@@ -1,0 +1,55 @@
+# Secrets
+.env
+.env.*
+*.env
+.streamlit/secrets.toml
+**/.streamlit/secrets.toml
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+**/venv/
+**/.venv/
+
+# Python build files
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Large/generated files
+*.zip
+*.tar
+*.gz
+*.mp4
+*.mov
+*.avi
+
+# AI / ML cache and model files
+.deepface/
+.keras/
+models/
+checkpoints/
+*.h5
+*.pkl
+*.joblib
+

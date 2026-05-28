@@ -1,0 +1,81 @@
+/* Floating Chatbot */
+.sc-chat-fab {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  width: 60px;
+  height: 60px;
+  border-radius: 999px;
+  background: var(--primary, #5B6CFF);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  box-shadow: 0 16px 42px rgba(91, 108, 255, .38);
+  cursor: pointer;
+  z-index: 9999;
+  transition: transform .2s ease;
+  border: none;
+}
+
+.sc-chat-fab:hover {
+  transform: scale(1.08);
+}
+
+.sc-chat-window {
+  position: fixed;
+  right: 28px;
+  bottom: 104px;
+  width: 340px;
+  background: #fff;
+  border-radius: 24px;
+  box-shadow: 0 24px 64px rgba(31, 41, 55, .16);
+  z-index: 9998;
+  overflow: hidden;
+  border: 1px solid #E5E7EB;
+}
+
+.sc-chat-header {
+  background: var(--primary, #5B6CFF);
+  padding: 16px 20px;
+  color: #fff;
+  font-weight: 700;
+  font-family: Poppins, sans-serif;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sc-chat-body {
+  padding: 18px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.sc-chat-msg {
+  padding: 10px 14px;
+  border-radius: 14px;
+  margin-bottom: 10px;
+  font-size: .9rem;
+  line-height: 1.5;
+}
+
+.sc-chat-bot {
+  background: rgba(91, 108, 255, .08);
+  color: #1F2937;
+}
+
+.sc-chat-user {
+  background: var(--primary, #5B6CFF);
+  color: #fff;
+  text-align: right;
+  margin-left: 20%;
+}
+
+.sc-chat-footer {
+  padding: 14px 18px;
+  border-top: 1px solid #E5E7EB;
+  display: flex;
+  gap: 8px;
+}

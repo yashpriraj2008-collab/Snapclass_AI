@@ -1,0 +1,32 @@
+# Secrets
+.streamlit/secrets.toml
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# AI models
+*.h5
+*.pkl
+*.pt
+models/
+
+# Secrets
+.streamlit/secrets.toml
+
+# Zip files
+*.zip
