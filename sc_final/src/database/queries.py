@@ -92,7 +92,7 @@ def _fetch_students(db, class_name: Optional[str]):
 
     # Ensure required columns exist for consistent UI rendering.
     if "attendance" not in df.columns:
-        df["attendance"] = 85.0
+        df["attendance"] = 0.0
     if "email" not in df.columns:
         df["email"] = ""
     if "class_name" not in df.columns:
@@ -282,11 +282,11 @@ def _save_session(records: list):
 def get_attendance_for_student(roll_no: str) -> pd.DataFrame:
     db = get_supabase()
     if db is None:
-        return _demo_attendance_history()
+        return pd.DataFrame()
     try:
         sid = get_student_id(roll_no)
         if not sid:
-            return pd.DataFrame(_demo_attendance_history())
+            return pd.DataFrame()
         data = (db.table("attendance")
                   .select("attendance_date,status,subjects(name)")
                   .eq("student_id", sid)
@@ -294,7 +294,7 @@ def get_attendance_for_student(roll_no: str) -> pd.DataFrame:
                   .limit(60)
                   .execute().data)
         if not data:
-            return _demo_attendance_history()
+            return pd.DataFrame()
         rows = []
         for r in data:
             subj = r.get("subjects") or {}
@@ -305,7 +305,7 @@ def get_attendance_for_student(roll_no: str) -> pd.DataFrame:
             })
         return pd.DataFrame(rows)
     except Exception:
-        return _demo_attendance_history()
+        return pd.DataFrame()
 
 def get_attendance_for_class(class_name: Optional[str], subject_name: str, att_date: str) -> pd.DataFrame:
     """Get already-saved attendance for a class/subject/date."""
@@ -336,7 +336,7 @@ def get_attendance_stats_for_student(roll_no: str) -> dict:
     """Returns {total, present, absent, pct} from Supabase or demo."""
     db = get_supabase()
     if db is None:
-        return {"total": 42, "present": 36, "absent": 6, "pct": 85.7}
+        return {"total": 0, "present": 0, "absent": 0, "pct": 0}
     try:
         sid = get_student_id(roll_no)
         if not sid:
@@ -356,8 +356,7 @@ def get_class_attendance_summary(class_name: Optional[str]) -> list:
         return []
     db = get_supabase()
     if db is None:
-        students = demo.STUDENTS.loc[demo.STUDENTS["class_name"] == class_name, ["name", "roll", "attendance"]]
-        return students.rename(columns={"attendance": "pct"}).to_dict("records")
+        return []
     try:
         data = (db.table("students")
                   .select("id,name,roll_no")

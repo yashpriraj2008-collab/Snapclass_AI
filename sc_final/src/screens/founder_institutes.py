@@ -45,6 +45,9 @@ def render_founder_institutes() -> None:
     st.divider()
 
     with st.expander("➕ Add New Institute", expanded=True):
+        institute_types = ["School", "Coaching", "Tuition", "College"]
+        plans = ["Free Demo", "Starter", "Pro", "Enterprise"]
+
         with st.form("founder_add_institute_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             name = col1.text_input("Institute Name", placeholder="Sunrise Academy")
@@ -53,10 +56,12 @@ def render_founder_institutes() -> None:
             state = col3.text_input("State", placeholder="Maharashtra")
             institute_type = col4.selectbox(
                 "Institute Type",
-                options=["School", "Coaching", "Tuition", "College"],
+                options=institute_types,
                 index=0,
-                key="fi_itype",
+                key="hq_institute_type",
+                label_visibility="visible",
             )
+            st.caption(f"Selected institute type: {institute_type}")
             address = st.text_area("Full Address", height=90, placeholder="Address line")
             col5, col6 = st.columns(2)
             admin_name = col5.text_input("Admin Name", placeholder="Priya Sharma")
@@ -65,10 +70,12 @@ def render_founder_institutes() -> None:
             admin_phone = col7.text_input("Admin Phone", placeholder="+91 98765 43210")
             plan = col8.selectbox(
                 "Plan",
-                options=["Demo", "Starter", "Pro", "Enterprise"],
+                options=plans,
                 index=0,
-                key="fi_iplan",
+                key="hq_plan",
+                label_visibility="visible",
             )
+            st.caption(f"Selected plan: {plan}")
 
             col9, col10 = st.columns(2)
             academic_year = col9.text_input("Academic Year", placeholder="2026-27")

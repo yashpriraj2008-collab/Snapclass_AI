@@ -46,16 +46,19 @@ def show_student_auth():
                     login("student", email.split("@")[0].title(), email,
                           user_roll="SC001", page="dashboard")
                 else:
-                    res = login_user(email, pwd)
-                    if res.get("ok"):
-                        user = verify_student(email, pwd)
+                    user = verify_student(email, pwd)
+                    if user:
+                        if user.get("student_id"):
+                            st.session_state["student_id"] = str(user.get("student_id"))
+                        if user.get("roll"):
+                            st.session_state["roll_no"] = str(user.get("roll"))
                         login("student",
-                              user.get("name", email.split("@")[0].title()) if user else email.split("@")[0].title(),
-                              email,
-                              user_roll=user.get("roll","") if user else "",
+                              user.get("name", email.split("@")[0].title()),
+                              user.get("email", email),
+                              user_roll=user.get("roll", ""),
                               page="dashboard")
                     else:
-                        st.error(res.get("message","Login failed. Check your credentials."))
+                        st.error("Login failed. Check email/password and make sure this account is a student.")
 
     with tab_reg:
         full_name = st.text_input("Full Name *", key="sr_full_name", placeholder="Your Name")
@@ -127,14 +130,16 @@ def show_teacher_auth():
                 if get_supabase() is None:
                     login("teacher", email.split("@")[0].title(), email, page="dashboard")
                 else:
-                    res = login_user(email, pwd)
-                    if res.get("ok"):
-                        user = verify_teacher(email, pwd)
+                    user = verify_teacher(email, pwd)
+                    if user:
+                        if user.get("user_id"):
+                            st.session_state["user_id"] = str(user.get("user_id"))
+                            st.session_state["teacher_id"] = str(user.get("user_id"))
                         login("teacher",
-                              user.get("name", email.split("@")[0].title()) if user else email.split("@")[0].title(),
-                              email, page="dashboard")
+                              user.get("name", email.split("@")[0].title()),
+                              user.get("email", email), page="dashboard")
                     else:
-                        st.error(res.get("message","Login failed."))
+                        st.error("Login failed. Check email/password and make sure this account is a teacher.")
 
     with tab_reg:
         full_name = st.text_input("Full Name *", key="tr_full_name", placeholder="Dr. Sharma")

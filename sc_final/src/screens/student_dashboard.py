@@ -1,6 +1,10 @@
 """Student portal — all pages."""
-import streamlit as st
+from __future__ import annotations
+
+from typing import Any
+
 import plotly.express as px
+import streamlit as st
 from src.components.sidebar import student_sidebar
 from src.components.ui import db_status_banner
 from src.utils.session import nav_student, check_route_access
@@ -32,18 +36,27 @@ def _get_subjects():
 
 def _get_stats():
     try:
-        from src.database.queries import get_attendance_stats_for_student
-        from src.services.student_identity import resolve_student_identity
         from src.database.client import get_supabase
+        from src.services.attendance_service import get_student_attendance_records
+        from src.services.student_identity import resolve_student_identity
 
         supabase = get_supabase()
-        resolved = resolve_student_identity(supabase) if supabase else None
-        # stats helper accepts roll_no in this repo.
-        roll = st.session_state.get("roll_no") or st.session_state.get("user_roll", "SC001")
-        return get_attendance_stats_for_student(str(roll))
+        if not supabase:
+            return {"pct": 0, "present": 0, "absent": 0, "total": 0, "live": False}
+
+        resolved_id = resolve_student_identity(supabase, show_error=False)
+        if not resolved_id:
+            return {"pct": 0, "present": 0, "absent": 0, "total": 0, "live": True}
+
+        rows = get_student_attendance_records(supabase, str(resolved_id)) or []
+        total = len(rows)
+        present = sum(1 for row in rows if str(row.get("status", "")).lower() in {"present", "late"})
+        absent = total - present
+        pct = round((present / total) * 100, 1) if total else 0
+        return {"pct": pct, "present": present, "absent": absent, "total": total, "live": True}
 
     except Exception:
-        return {"pct":85.7,"present":36,"absent":6,"total":42}
+        return {"pct": 0, "present": 0, "absent": 0, "total": 0, "live": False}
 
 # Old student-specific notification bell removed.
 # Notification UI is now rendered globally from src/components/notifications.py
@@ -66,7 +79,9 @@ def _dashboard():
 
     subj  = _get_subjects()
     stats = _get_stats()
-    overall = stats.get("pct") or (round(subj.present.sum()/subj.total.sum()*100,1) if not subj.empty else 0)
+    if not stats.get("total"):
+        st.info("No live attendance records found yet.")
+    overall = stats.get("pct", 0)
 
     c1,c2,c3,c4 = st.columns(4,gap="medium")
     for col,label,val,color,icon in [
@@ -161,6 +176,7 @@ def _subjects():
     st.caption("View all your enrolled subjects and track attendance")
     st.markdown("<br>", unsafe_allow_html=True)
 
+
     # --- Enrollment: enroll in subject via join code ---
     st.markdown("## ➕ Enroll in Subject")
 
@@ -201,45 +217,86 @@ def _subjects():
 
 
     # --- My Subjects (from enrolments) ---
-    subj_rows = []
+    # Must use real PRD records to compute attendance.
+    subj_rows: list[dict[str, Any]] = []
     try:
-        from src.services.subject_service import get_student_enrolled_subjects
+        import pandas as pd
 
+        from src.services.subject_service import get_student_enrolled_subjects
         from src.services.student_identity import resolve_student_identity
+        from src.database.client import get_supabase
 
         resolved_id = None
         if supabase is not None:
             resolved_id = resolve_student_identity(supabase)
 
         if supabase is not None and resolved_id:
+            # Subject rows from PRD enrollment
             subj_rows = get_student_enrolled_subjects(supabase, resolved_id) or []
+
+            # Now compute attendance aggregates from attendance_sessions/records.
+            # We keep the existing card renderer contract:
+            # columns: subject, teacher, total, present, attendance
+            from src.services.attendance_service import get_student_attendance_records
+
+            recs = get_student_attendance_records(supabase, str(resolved_id)) or []
+            rec_df = pd.DataFrame(recs)
+
+            # Normalize known columns
+            if "subject_id" in rec_df.columns:
+                rec_df["subject_id"] = rec_df["subject_id"].astype(str)
+            if "status" in rec_df.columns:
+                rec_df["status"] = rec_df["status"].astype(str).str.lower()
+
+            # Build subject_id -> attendance counts
+            counts: dict[str, dict[str, int]] = {}
+            if not rec_df.empty and "subject_id" in rec_df.columns and "status" in rec_df.columns:
+                for _, row in rec_df.iterrows():
+                    sid = str(row.get("subject_id")) if row.get("subject_id") is not None else None
+                    if not sid:
+                        continue
+                    stt = str(row.get("status") or "present").lower()
+                    counts.setdefault(sid, {"present": 0, "total": 0})
+                    counts[sid]["total"] += 1
+                    if stt == "present" or stt == "late":
+                        counts[sid]["present"] += 1
+
+            rows_out: list[dict[str, Any]] = []
+            for s in subj_rows:
+                sid = s.get("id") or s.get("subject_id")
+                sid_str = str(sid) if sid is not None else ""
+                present = counts.get(sid_str, {}).get("present", 0)
+                total = counts.get(sid_str, {}).get("total", 0)
+                attendance = round((present / total) * 100, 1) if total else 0
+
+                teacher_val = (
+                    s.get("teacher_name")
+                    or s.get("teacher_email")
+                    or s.get("teacher")
+                    or "—"
+                )
+
+                subject_val = s.get("subject_name") or s.get("name") or s.get("subject") or "Untitled"
+
+                rows_out.append(
+                    {
+                        "subject": subject_val,
+                        "teacher": teacher_val,
+                        "total": total,
+                        "present": present,
+                        "attendance": attendance,
+                    }
+                )
+
+            subj = pd.DataFrame(rows_out)
 
     except Exception as e:
         st.caption(f"[debug] enrolled subjects fetch failed: {e}")
 
-    if not subj_rows:
+    if "subj" not in locals() or subj is None or subj.empty:
         st.info("No subjects found.")
         return
 
-    # Normalize to pandas-like rows for the existing card renderer
-    # (existing code expects a DataFrame with columns: subject, teacher, total, present, attendance)
-    # We'll render minimal info using whatever columns exist.
-    import pandas as pd
-
-    subj_df = pd.DataFrame(subj_rows)
-    if "subject" not in subj_df.columns:
-        # Map likely columns from your `subjects` table
-        subj_df["subject"] = subj_df.get("name")
-    if "teacher" not in subj_df.columns:
-        subj_df["teacher"] = subj_df.get("teacher_name") or subj_df.get("teacher_email") or "—"
-    if "total" not in subj_df.columns:
-        subj_df["total"] = 0
-    if "present" not in subj_df.columns:
-        subj_df["present"] = 0
-    if "attendance" not in subj_df.columns:
-        subj_df["attendance"] = 0
-
-    subj = subj_df
 
 
     GRADS = [
@@ -298,87 +355,65 @@ def _history():
     import pandas as pd
     import streamlit as st
 
-    # Supabase client is created inside db_status_banner() sometimes; safest is to re-init here.
     try:
         from src.database.client import get_supabase
+        from src.services.student_identity import resolve_student_identity
+        from src.services.attendance_service import get_student_attendance_records
 
         supabase = get_supabase()
     except Exception:
         supabase = None
 
-    if supabase is None:
-        st.warning("Supabase not connected. Attendance History may be unavailable.")
-        return
-
     st.markdown("## 📋 Attendance History")
 
-    # Resolve student_id via shared resolver.
-    from src.services.student_identity import resolve_student_identity
+    if supabase is None:
+        st.warning("Supabase not connected. Attendance History is unavailable.")
+        return
 
     resolved_id = resolve_student_identity(supabase)
     if not resolved_id:
-        st.warning("Student identity missing. Please login again so the app can map your email/roll number."
-                   )
+        st.warning("Student identity missing. Login again or ask admin to add your student profile with the same email.")
         return
 
-    try:
-        query = supabase.table("attendance").select("*").eq("student_id", resolved_id)
-        result = query.order("attendance_date", desc=True).execute()
-        rows = result.data or []
+    rows = get_student_attendance_records(supabase, resolved_id)
 
-        if not rows:
-            st.info("No attendance history found yet.")
-            st.caption("Once your teacher marks attendance, records will appear here.")
-            return
+    if not rows:
+        st.info("No attendance history found yet.")
+        st.caption("Once your teacher marks attendance, records will appear here.")
+        return
 
+    df = pd.DataFrame(rows)
 
-        df = pd.DataFrame(rows)
+    rename_map = {
+        "attendance_date": "Date",
+        "date": "Date",
+        "class_name": "Class",
+        "class_id": "Class ID",
+        "subject_name": "Subject",
+        "subject": "Subject",
+        "subject_id": "Subject ID",
+        "status": "Status",
+        "marked_by": "Marked By",
+        "marked_at": "Marked At",
+        "created_at": "Saved At",
+    }
+    df = df.rename(columns=rename_map)
 
-        rename_map = {
-            "attendance_date": "Date",
-            "date": "Date",
-            "class_name": "Class",
-            "subject_name": "Subject",
-            "subject": "Subject",
-            "status": "Status",
-            "marked_by": "Marked By",
-            "created_at": "Saved At",
-        }
+    visible_cols = [
+        col for col in ["Date", "Class", "Subject", "Status", "Marked By", "Marked At", "Saved At"]
+        if col in df.columns
+    ]
 
-        df = df.rename(columns=rename_map)
+    st.dataframe(df[visible_cols] if visible_cols else df, use_container_width=True, hide_index=True)
 
-        visible_cols = [
-            col
-            for col in [
-                "Date",
-                "Class",
-                "Subject",
-                "Status",
-                "Marked By",
-                "Saved At",
-            ]
-            if col in df.columns
-        ]
-
-        st.dataframe(
-            df[visible_cols] if visible_cols else df,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-        if "Status" in df.columns:
-            present_count = (df["Status"].astype(str).str.lower() == "present").sum()
-            total_count = len(df)
-            percentage = round((present_count / total_count) * 100, 2) if total_count else 0
-
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total Records", total_count)
-            c2.metric("Present", present_count)
-            c3.metric("Attendance %", f"{percentage}%")
-
-    except Exception as e:
-        st.error("Could not load attendance history.")
-        st.exception(e)
+    if "Status" in df.columns:
+        present_count = (df["Status"].astype(str).str.lower() == "present").sum()
+        total_count = len(df)
+        percentage = round((present_count / total_count) * 100, 2) if total_count else 0
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total Records", total_count)
+        c2.metric("Present", int(present_count))
+        c3.metric("Attendance %", f"{percentage}%")
 
 
 def _analytics():
@@ -419,9 +454,12 @@ def _reports():
     db_status_banner()
     st.markdown("### 📄 Reports")
 
-    # Resolve student_id via shared resolver.
+    import pandas as pd
+
     try:
         from src.database.client import get_supabase
+        from src.services.student_identity import resolve_student_identity
+        from src.services.attendance_service import get_student_attendance_records
 
         supabase = get_supabase()
     except Exception:
@@ -431,43 +469,12 @@ def _reports():
         st.info("No attendance report found yet.")
         return
 
-    from src.services.student_identity import resolve_student_identity
-
     resolved_id = resolve_student_identity(supabase)
     if not resolved_id:
         st.info("No attendance report found yet.")
         return
 
-    import pandas as pd
-
-    # Prefer attendance_records if table exists; fall back to attendance.
-    rows = []
-    try:
-        rows = (
-            supabase.table("attendance_records")
-            .select("*")
-            .eq("student_id", resolved_id)
-            .order("attendance_date", desc=True)
-            .execute()
-            .data
-            or []
-        )
-    except Exception:
-        rows = []
-
-    if not rows:
-        try:
-            rows = (
-                supabase.table("attendance")
-                .select("*")
-                .eq("student_id", resolved_id)
-                .order("attendance_date", desc=True)
-                .execute()
-                .data
-                or []
-            )
-        except Exception:
-            rows = []
+    rows = get_student_attendance_records(supabase, resolved_id)
 
     if not rows:
         st.info("No attendance report found yet.")
@@ -475,40 +482,40 @@ def _reports():
         return
 
     df = pd.DataFrame(rows)
-
-    # Normalize columns for display.
     rename_map = {
         "attendance_date": "Date",
         "date": "Date",
         "class_name": "Class",
+        "class_id": "Class ID",
         "subject_name": "Subject",
         "subject": "Subject",
+        "subject_id": "Subject ID",
         "status": "Status",
         "marked_by": "Marked By",
+        "marked_at": "Marked At",
         "created_at": "Saved At",
     }
     df = df.rename(columns=rename_map)
 
     visible_cols = [
-        c
-        for c in [
-            "Date",
-            "Class",
-            "Subject",
-            "Status",
-            "Marked By",
-            "Saved At",
-        ]
+        c for c in ["Date", "Class", "Subject", "Status", "Marked By", "Marked At", "Saved At"]
         if c in df.columns
     ]
+    report_df = df[visible_cols] if visible_cols else df
 
-    st.dataframe(
-        df[visible_cols] if visible_cols else df,
-        use_container_width=True,
-        hide_index=True,
-    )
+    st.dataframe(report_df, use_container_width=True, hide_index=True)
 
-    csv = (df[visible_cols] if visible_cols else df).to_csv(index=False).encode("utf-8")
+    if "Status" in df.columns:
+        status_counts = df["Status"].astype(str).str.lower().value_counts().to_dict()
+        total = len(df)
+        present = status_counts.get("present", 0)
+        percent = round((present / total) * 100, 2) if total else 0
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total", total)
+        c2.metric("Present", present)
+        c3.metric("Attendance %", f"{percent}%")
+
+    csv = report_df.to_csv(index=False).encode("utf-8")
     st.download_button(
         "⬇️ Download CSV",
         csv,
@@ -516,10 +523,6 @@ def _reports():
         "text/csv",
         use_container_width=True,
     )
-
-
-
-
 
 
 def _profile():

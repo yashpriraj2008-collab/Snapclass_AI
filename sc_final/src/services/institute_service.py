@@ -148,14 +148,26 @@ def create_institute(
         return {"ok": True, "demo": True, "data": payload, "message": f"Institute '{name}' created locally."}
 
     try:
-        # Fetch inserted row so we reliably get the generated/inserted id.
+        db.table("institutes").insert(payload).execute()
         response = (
             db.table("institutes")
-            .insert(payload)
             .select("*")
+            .eq("id", payload.get("id"))
+            .limit(1)
             .execute()
         )
         rows = response.data or []
+        if not rows:
+            response = (
+                db.table("institutes")
+                .select("*")
+                .eq("name", payload.get("name"))
+                .eq("city", payload.get("city"))
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            rows = response.data or []
         record = rows[0] if rows else payload
 
         # Ensure subsequent steps have the correct id.

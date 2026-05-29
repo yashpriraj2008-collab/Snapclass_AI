@@ -155,11 +155,8 @@ def show_attendance():
 
             records.append(
                 {
-                    "roll": roll,
-                    "subject": subjects[0].get("subject_name") if subjects else subject_label.split("(")[0].strip(),
-                    "date": date_str,
+                    "student_id": s.get("id"),
                     "status": "present" if present else "absent",
-                    "class_id": selected_class_id,
                 }
             )
 
@@ -169,19 +166,25 @@ def show_attendance():
         return
 
     try:
-        from src.services.attendance_service import save_attendance
+        from src.services.attendance_service import mark_manual_attendance
 
-        res = save_attendance(records)
-        if res.get("ok"):
-            if res.get("demo"):
-                st.warning(res.get("message", "Saved locally due to Supabase issue."))
-            else:
-                st.success(res.get("message", "Attendance saved."))
+        db = _safe_db()
+        ok, message, saved_count, errors = mark_manual_attendance(
+            supabase=db,
+            teacher_id=st.session_state.get("teacher_id") or st.session_state.get("user_id"),
+            class_id=selected_class_id,
+            subject_id=selected_subject_id,
+            attendance_date=date_str,
+            records=records,
+        )
+
+        if ok:
+            st.success(f"Attendance saved successfully. {saved_count} records saved.")
+            if errors:
+                st.warning(f"{len(errors)} row(s) skipped: {', '.join(errors[:3])}")
         else:
-            err = res.get("error")
-            if err:
-                st.exception(err if isinstance(err, BaseException) else Exception(str(err)))
-            else:
-                st.error(res.get("message", "Failed to save attendance."))
+            st.error(f"Attendance not saved: {message}")
+            if errors:
+                st.caption("; ".join(errors[:5]))
     except Exception as e:
         st.exception(e)

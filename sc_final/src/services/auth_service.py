@@ -53,6 +53,60 @@ def save_user_profile(
 
 
 
+
+
+def ensure_student_row(
+    *,
+    email: str,
+    full_name: str,
+    roll_no: str | None = None,
+    class_name: str | None = None,
+    user_id: str | None = None,
+) -> Dict[str, Any]:
+    """Ensure a public.students row exists for student identity resolver.
+
+    MVP rule: student login email must match public.students.email.
+    """
+    db = get_supabase()
+    if not db:
+        return {"ok": False, "error": "Supabase is not connected."}
+
+    email_norm = (email or "").strip().lower()
+    if not email_norm:
+        return {"ok": False, "error": "Email is required."}
+
+    payload = {
+        "email": email_norm,
+        "name": (full_name or "Student").strip() or "Student",
+        "roll_no": (roll_no or "").strip() or None,
+        "class_name": (class_name or "").strip() or None,
+        "status": "active",
+    }
+
+    try:
+        existing = (
+            db.table("students")
+            .select("id")
+            .eq("email", email_norm)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            db.table("students").update(payload).eq("email", email_norm).execute()
+        else:
+            db.table("students").insert(payload).execute()
+        res = (
+            db.table("students")
+            .select("*")
+            .eq("email", email_norm)
+            .limit(1)
+            .execute()
+        )
+        return {"ok": True, "data": getattr(res, "data", None)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 # -----------------------------------------------------------------------------
 # Low-level helpers
 # -----------------------------------------------------------------------------
@@ -84,7 +138,7 @@ def get_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
     try:
         res = (
             db.table("user_profiles")
-            .select("user_id,email,full_name,role,institute_id,created_at")
+            .select("user_id,email,full_name,role,institute_id,roll_no,class_name,subject,created_at")
             .eq("user_id", user_id)
             .limit(1)
             .execute()
@@ -180,6 +234,22 @@ def register_user(
                 "message": f"Auth created, but profile save failed: {profile_resp.get('error','Profile save failed.')}",
             }
 
+        # Critical PRD fix: student identity resolver uses public.students.id.
+        # So student registration must also create/update public.students.
+        if role == "student":
+            student_resp = ensure_student_row(
+                email=email,
+                full_name=full_name,
+                roll_no=profile_payload.get("roll_no"),
+                class_name=profile_payload.get("class_name"),
+                user_id=user_id,
+            )
+            if not student_resp.get("ok"):
+                return {
+                    "ok": False,
+                    "message": f"Auth/profile created, but student row save failed: {student_resp.get('error','Student row save failed.')}",
+                }
+
         return {"ok": True, "user": user}
 
     except Exception as e:
@@ -230,12 +300,33 @@ def verify_student(email: str, password: str) -> Optional[Dict[str, Any]]:
     if profile.get("role") != "student":
         return None
 
+    # Ensure student row exists and fetch public.students.id for the PRD resolver.
+    email_norm = (profile.get("email") or email or "").strip().lower()
+    roll_no = profile.get("roll_no") or profile.get("roll") or profile.get("user_roll") or ""
+    student_row = None
+    try:
+        ensure_student_row(
+            email=email_norm,
+            full_name=profile.get("full_name") or "Student",
+            roll_no=roll_no,
+            class_name=profile.get("class_name") or "",
+            user_id=user_id,
+        )
+        db = get_supabase()
+        if db:
+            found = db.table("students").select("*").eq("email", email_norm).limit(1).execute()
+            if found.data:
+                student_row = found.data[0]
+    except Exception:
+        student_row = None
+
     return {
         "user_id": user_id,
-        "email": profile.get("email") or email,
-        "name": profile.get("full_name") or "Student",
-        "roll": profile.get("roll") or profile.get("user_roll") or "",
-        "class_name": profile.get("class_name") or "",
+        "student_id": student_row.get("id") if student_row else None,
+        "email": email_norm,
+        "name": (student_row or {}).get("name") or profile.get("full_name") or "Student",
+        "roll": (student_row or {}).get("roll_no") or roll_no or "",
+        "class_name": (student_row or {}).get("class_name") or profile.get("class_name") or "",
     }
 
 
@@ -298,4 +389,3 @@ def register_student_demo(name: str, email: str, roll: str) -> Dict[str, Any]:
 
 def register_teacher_demo(name: str, email: str, subject: str) -> Dict[str, Any]:
     return {"ok": False, "message": "Demo registration disabled. Use real Register flow."}
-

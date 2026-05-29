@@ -70,11 +70,7 @@ def _class_title(class_row):
 
 
 def _get_current_teacher_id():
-    return (
-        st.session_state.get("teacher_id")
-        or st.session_state.get("user_id")
-        or st.session_state.get("profile_id")
-    )
+    return st.session_state.get("teacher_id")
 
 
 def _get_current_institute_id():
@@ -85,13 +81,72 @@ def _get_current_institute_id():
     )
 
 
-def _load_subjects_for_class(supabase, class_id):
+def _load_teacher_classes(supabase):
+    if not supabase:
+        return []
+
+    from src.services.teacher_service import get_teacher_assignments, resolve_teacher_identity
+
+    teacher = resolve_teacher_identity(supabase, show_error=False)
+    teacher_id = (teacher or {}).get("id")
+    if not teacher_id:
+        return []
+
     try:
-        res = (
-            supabase
-            .table("subjects")
+        assignments = get_teacher_assignments(supabase, teacher_id)
+        nested_classes = [
+            row.get("classes")
+            for row in assignments
+            if isinstance(row.get("classes"), dict)
+        ]
+        if nested_classes:
+            return nested_classes
+
+        class_ids = sorted({row.get("class_id") for row in assignments if row.get("class_id")})
+        if not class_ids:
+            return []
+
+        classes_res = (
+            supabase.table("classes")
             .select("*")
-            .eq("class_id", class_id)
+            .in_("id", class_ids)
+            .order("created_at", desc=False)
+            .execute()
+        )
+        return classes_res.data or []
+    except Exception as e:
+        st.warning(f"Could not load assigned classes: {e}")
+
+    return []
+
+
+def _load_subjects_for_class(supabase, class_id):
+    from src.services.teacher_service import get_teacher_assignments, resolve_teacher_identity
+
+    try:
+        teacher = resolve_teacher_identity(supabase, show_error=False)
+        teacher_id = (teacher or {}).get("id")
+        assignments = get_teacher_assignments(supabase, teacher_id)
+        nested_subjects = [
+            row.get("subjects")
+            for row in assignments
+            if str(row.get("class_id")) == str(class_id) and isinstance(row.get("subjects"), dict)
+        ]
+        if nested_subjects:
+            return nested_subjects
+
+        subject_ids = [
+            row.get("subject_id")
+            for row in assignments
+            if str(row.get("class_id")) == str(class_id) and row.get("subject_id")
+        ]
+        if not subject_ids:
+            return []
+
+        res = (
+            supabase.table("subjects")
+            .select("*")
+            .in_("id", subject_ids)
             .order("created_at", desc=False)
             .execute()
         )
@@ -138,18 +193,21 @@ def _dashboard():
     db_status_banner()
     name = (st.session_state.get("user_name", "") or "Teacher").replace(" Demo", "").strip()
     st.markdown(f"<h1>Welcome back, {name}! 👋</h1>", unsafe_allow_html=True)
+
     st.markdown("<p style='color:#6B7280;margin-top:-8px;'>Teaching overview for today</p>",
                 unsafe_allow_html=True)
 
+
     students = _get_students()
-    avg_att = round(students.attendance.mean(), 1) if not students.empty else 0
+    avg_att = 0
+    st.info("No live attendance records found yet.")
 
     c1, c2, c3, c4 = st.columns(4, gap="medium")
     for col, label, val, color, icon in [
-        (c1, "Total Classes", len(CLASSES), "pink", "🏫"),
-        (c2, "Total Students", len(students), "blue", "👥"),
+        (c1, "Total Classes", 0, "pink", "🏫"),
+        (c2, "Total Students", 0, "blue", "👥"),
         (c3, "Avg Attendance", f"{avg_att}%", "green", "📈"),
-        (c4, "Sessions Today", "3", "orange", "🗓️"),
+        (c4, "Sessions Today", "0", "orange", "🗓️"),
     ]:
         with col:
             st.markdown(
@@ -165,6 +223,7 @@ def _dashboard():
     col_l, col_r = st.columns([1.4, 1], gap="large")
     with col_l:
         st.markdown("#### 📊 Weekly Attendance")
+        st.caption("Demo data only")
         fig = px.bar(WEEKLY_TREND, x="day", y="rate", color_discrete_sequence=["#5B6CFF"])
         fig.add_hline(y=75, line_dash="dash", line_color="#EF4444")
         fig.update_layout(
@@ -176,6 +235,7 @@ def _dashboard():
         st.plotly_chart(fig, use_container_width=True)
     with col_r:
         st.markdown("#### 🕐 Today's Sessions")
+        st.caption("Demo data only")
         for subj, time, cls, status in [
             ("Mathematics", "9:00 AM", "12-A", "Present"),
             ("Physics", "11:00 AM", "12-B", "Upcoming"),
@@ -200,9 +260,9 @@ def _dashboard():
                 name,
                 "All Classes",
                 {
-                    "total": len(students),
+                    "total": 0,
                     "avg": avg_att,
-                    "low": len(students[students.attendance < 75]) if not students.empty else 0,
+                    "low": 0,
                 },
             )
             st.success("✅ Report sent!") if r.get("ok") else st.warning(r.get("message", ""))
@@ -213,8 +273,9 @@ def _dashboard():
 def _manual_att():
     st.markdown("## 📝 Manual Attendance")
 
-    from src.services.attendance_service import save_attendance_records
+    from src.services.attendance_service import mark_manual_attendance
     from src.database.client import get_supabase_client
+    from src.services.teacher_service import get_teacher_assignments, resolve_teacher_identity
 
     supabase = get_supabase_client()
 
@@ -222,13 +283,41 @@ def _manual_att():
         st.error("Supabase is not connected.")
         return
 
-    try:
-        classes_res = supabase.table("classes").select("*").execute()
-        subjects_res = supabase.table("subjects").select("*").execute()
-        students_res = supabase.table("students").select("*").execute()
+    teacher = resolve_teacher_identity(supabase)
+    if not teacher:
+        st.stop()
 
-        classes = classes_res.data or []
-        subjects = subjects_res.data or []
+    teacher_id = teacher["id"]
+    assignments = get_teacher_assignments(supabase, teacher_id)
+    if not assignments:
+        st.info("No assigned classes or subjects found for this teacher.")
+        return
+
+    try:
+        class_ids = sorted({a.get("class_id") for a in assignments if a.get("class_id")})
+        subject_ids = sorted({a.get("subject_id") for a in assignments if a.get("subject_id")})
+        if not class_ids:
+            st.info("No assigned classes found for this teacher.")
+            return
+
+        classes = [
+            a.get("classes")
+            for a in assignments
+            if isinstance(a.get("classes"), dict)
+        ]
+        subjects = [
+            a.get("subjects")
+            for a in assignments
+            if isinstance(a.get("subjects"), dict)
+        ]
+
+        if not classes and class_ids:
+            classes_res = supabase.table("classes").select("*").in_("id", class_ids).execute()
+            classes = classes_res.data or []
+        if not subjects and subject_ids:
+            subjects_res = supabase.table("subjects").select("*").in_("id", subject_ids).execute()
+            subjects = subjects_res.data or []
+        students_res = supabase.table("students").select("*").in_("class_id", class_ids).execute()
         students = students_res.data or []
 
     except Exception as e:
@@ -347,12 +436,26 @@ def _manual_att():
     c2.metric("Absent", len(class_students) - present_count)
 
     if st.button("💾 Save", key="save_manual_attendance"):
-        result = save_attendance_records(attendance_records)
+        ok, message, saved_count, errors = mark_manual_attendance(
+            supabase=supabase,
+            teacher_id=teacher_id,
+            class_id=selected_class_id,
+            subject_id=selected_subject_id,
+            attendance_date=str(selected_date),
+            records=[
+                {"student_id": row.get("student_id"), "status": row.get("status")}
+                for row in attendance_records
+            ],
+        )
 
-        if result.get("success"):
-            st.success(f"✅ {result.get('saved', 0)} records saved to Supabase.")
+        if ok:
+            st.success(f"✅ {saved_count} records saved to Supabase.")
+            if errors:
+                st.warning(f"{len(errors)} row(s) skipped: {', '.join(errors[:3])}")
         else:
-            st.error(f"❌ Attendance not saved: {result.get('error')}")
+            st.error(f"❌ Attendance not saved: {message}")
+            if errors:
+                st.caption("; ".join(errors[:5]))
 
 
 def _ai_att():
@@ -374,6 +477,9 @@ def _ai_att():
     except Exception:
         classes = []
         subjects = []
+
+    if not classes:
+        classes = _load_teacher_classes(supabase)
 
     if not classes:
         classes = [
@@ -587,6 +693,9 @@ def _classes():
             classes = classes_res.data or []
         except Exception as e:
             st.warning(f"Could not load classes from Supabase: {e}")
+
+    if not classes:
+        classes = _load_teacher_classes(supabase)
 
     if not classes:
         classes = CLASSES.to_dict("records") if hasattr(CLASSES, "to_dict") else []
@@ -1008,6 +1117,9 @@ def _reports():
     db_status_banner()
     st.markdown("### 📄 Reports")
     students = _get_students()
+    if students.empty or "attendance" not in students.columns or not students["attendance"].sum():
+        st.info("No live attendance records found yet.")
+        return
     if not students.empty:
         cls_opts = ["All"] + students.class_name.unique().tolist()
         f = st.selectbox("Filter by Class", cls_opts, key="r_cls")

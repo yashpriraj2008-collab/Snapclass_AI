@@ -5,7 +5,7 @@
 .streamlit/secrets.toml
 **/.streamlit/secrets.toml
 
-# Python
+# Python cache
 __pycache__/
 **/__pycache__/
 *.py[cod]
@@ -20,7 +20,7 @@ ENV/
 **/venv/
 **/.venv/
 
-# Build files
+# Python build files
 *.egg-info/
 dist/
 build/
@@ -44,7 +44,7 @@ Thumbs.db
 *.mov
 *.avi
 
-# AI/ML cache and model files
+# AI / ML cache and model files
 .deepface/
 .keras/
 models/
@@ -52,11 +52,3 @@ checkpoints/
 *.h5
 *.pkl
 *.joblib
-
-# Backup folders
-git_backup/
-sc_final_old_backup/
-snapclass_sc_final_p0_fixed/
-*_backup/
-*_old_backup/
-

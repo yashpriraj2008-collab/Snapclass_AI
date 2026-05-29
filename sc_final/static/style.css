@@ -1336,3 +1336,578 @@ div[data-baseweb="popover"] * {
   color: #111827 !important;
   background-color: #ffffff !important;
 }
+
+/* ===============================
+   Streamlit Selectbox Visibility Fix
+   Forces selected text and menu options to remain readable.
+   =============================== */
+div[data-baseweb="select"] {
+  background: #ffffff !important;
+}
+
+div[data-baseweb="select"] > div {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 10px !important;
+  min-height: 44px !important;
+}
+
+div[data-baseweb="select"] span,
+div[data-baseweb="select"] input,
+div[data-baseweb="select"] div {
+  color: #111827 !important;
+  opacity: 1 !important;
+  -webkit-text-fill-color: #111827 !important;
+}
+
+div[data-baseweb="select"] svg {
+  color: #111827 !important;
+  fill: #111827 !important;
+}
+
+ul[role="listbox"] {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+
+ul[role="listbox"] li,
+div[role="option"] {
+  color: #111827 !important;
+  background-color: #ffffff !important;
+}
+
+ul[role="listbox"] li:hover,
+div[role="option"]:hover {
+  background-color: #f3f4f6 !important;
+  color: #111827 !important;
+}
+
+/* ==============================
+   SnapClass Bot Layout Fix
+   ============================== */
+
+.snapbot-toggle {
+    display: none;
+}
+
+.snapbot-floating-button,
+.snapbot-float-btn {
+    position: fixed;
+    right: 28px;
+    bottom: 28px;
+    width: 68px;
+    height: 68px;
+    border-radius: 50%;
+    border: none;
+    background: linear-gradient(135deg, #6366f1, #ec4899);
+    color: white !important;
+    font-size: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 18px 40px rgba(99, 102, 241, 0.35);
+    z-index: 9999;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.snapbot-floating-button:hover,
+.snapbot-float-btn:hover {
+    transform: translateY(-1px);
+}
+
+.snapbot-panel {
+    position: fixed;
+    right: 28px;
+    bottom: 110px;
+    width: 430px;
+    max-width: calc(100vw - 56px);
+    height: min(680px, calc(100vh - 140px));
+    background: #ffffff;
+    border-radius: 24px;
+    box-shadow: 0 24px 80px rgba(15, 23, 42, 0.22);
+    z-index: 9998;
+    overflow: hidden;
+    display: none;
+    flex-direction: column;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+}
+
+.snapbot-toggle:checked ~ .snapbot-panel {
+    display: flex;
+}
+
+.snapbot-header {
+    flex-shrink: 0;
+    padding: 20px 22px;
+    background: linear-gradient(135deg, #6366f1, #ec4899);
+    color: #111827 !important;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.snapbot-header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+}
+
+.snapbot-avatar {
+    width: 54px;
+    height: 54px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    flex-shrink: 0;
+}
+
+.snapbot-title {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 900;
+    color: #111827 !important;
+    line-height: 1.15;
+}
+
+.snapbot-subtitle {
+    margin: 3px 0 0 0;
+    font-size: 0.9rem;
+    color: #111827 !important;
+    opacity: 0.9;
+    line-height: 1.3;
+}
+
+.snapbot-close {
+    background: transparent;
+    border: none;
+    color: #111827 !important;
+    font-size: 26px;
+    cursor: pointer;
+    line-height: 1;
+    padding-left: 12px;
+    text-decoration: none;
+    flex-shrink: 0;
+}
+
+.snapbot-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    background: #ffffff;
+    min-height: 0;
+}
+
+.snapbot-body::-webkit-scrollbar {
+    width: 6px;
+}
+
+.snapbot-body::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 10px;
+}
+
+.snapbot-role-badge,
+.snapbot-page-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: #f1f5f9;
+    color: #111827 !important;
+    font-size: 0.85rem;
+    font-weight: 800;
+    margin-bottom: 16px;
+}
+
+.snapbot-section-title,
+.snapbot-try {
+    font-size: 1rem;
+    font-weight: 900;
+    color: #111827 !important;
+    margin: 0 0 14px 0;
+}
+
+.snapbot-question-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.snapbot-item {
+    margin-bottom: 0;
+}
+
+.snapbot-radio {
+    display: none;
+}
+
+.snapbot-question-card,
+.snapbot-question {
+    width: 100%;
+    padding: 14px 16px;
+    border-radius: 16px;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.04);
+    cursor: pointer;
+    transition: 0.18s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.snapbot-question-card:hover,
+.snapbot-question:hover {
+    border-color: #6366f1;
+    background: #f8fafc;
+    transform: translateY(-1px);
+}
+
+.snapbot-radio:checked + .snapbot-question {
+    border-color: #6366f1;
+    box-shadow: 0 10px 24px rgba(99, 102, 241, 0.16);
+    background: #f8faff;
+}
+
+.snapbot-question-title,
+.snapbot-question-category {
+    font-size: 0.78rem;
+    font-weight: 900;
+    color: #111827 !important;
+}
+
+.snapbot-question-sub,
+.snapbot-question-text {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #111827 !important;
+    line-height: 1.4;
+}
+
+.snapbot-answer-card {
+    margin-top: 12px;
+    padding: 18px;
+    border-radius: 18px;
+    background: #f8fafc;
+    border: 1px solid #e5e7eb;
+    color: #111827 !important;
+}
+
+.snapbot-answer-card h4 {
+    margin: 0 0 10px 0;
+    font-size: 1rem;
+    font-weight: 900;
+    color: #111827 !important;
+}
+
+.snapbot-answer-heading,
+.snapbot-answer-label {
+    margin-top: 14px;
+    margin-bottom: 8px;
+    font-size: 0.78rem;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    color: #111827 !important;
+    text-transform: uppercase;
+}
+
+.snapbot-answer-heading:first-child {
+    margin-top: 0;
+}
+
+.snapbot-answer-title {
+    color: #111827 !important;
+    font-size: 1rem;
+    font-weight: 900;
+    line-height: 1.35;
+}
+
+.snapbot-answer-text,
+.snapbot-answer-card p,
+.snapbot-answer-card li {
+    font-size: 0.92rem;
+    line-height: 1.55;
+    color: #111827 !important;
+}
+
+.snapbot-list,
+.snapbot-answer-card ul {
+    margin: 8px 0 0 18px;
+    padding: 0;
+}
+
+.snapbot-answer-note,
+.snapbot-answer-next {
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: #111827 !important;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 10px 12px;
+    overflow-wrap: anywhere;
+}
+
+.snapbot-answer-next {
+    background: #eef2ff;
+    border-color: #c7d2fe;
+    color: #312e81 !important;
+    font-weight: 700;
+}
+
+.snapbot-table-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.snapbot-table-tag {
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: #3730a3 !important;
+    font-size: 0.78rem;
+    font-weight: 800;
+}
+
+.snapbot-footer {
+    flex-shrink: 0;
+    padding: 14px 18px;
+    border-top: 1px solid #e5e7eb;
+    background: #ffffff;
+    color: #111827 !important;
+    font-size: 0.85rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.snapbot-footer-note {
+    color: #111827 !important;
+    font-size: 0.85rem;
+    line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+    .snapbot-panel {
+        right: 12px;
+        left: 12px;
+        bottom: 92px;
+        width: auto;
+        max-width: none;
+        height: min(620px, calc(100vh - 115px));
+        border-radius: 22px;
+    }
+
+    .snapbot-floating-button,
+    .snapbot-float-btn {
+        right: 20px;
+        bottom: 20px;
+        width: 62px;
+        height: 62px;
+        font-size: 28px;
+    }
+
+    .snapbot-header {
+        padding: 16px 18px;
+    }
+
+    .snapbot-avatar {
+        width: 48px;
+        height: 48px;
+    }
+
+    .snapbot-title {
+        font-size: 1.1rem;
+    }
+
+    .snapbot-subtitle {
+        font-size: 0.82rem;
+    }
+
+    .snapbot-body {
+        padding: 16px;
+    }
+
+    .snapbot-question-card,
+    .snapbot-question {
+        padding: 13px 14px;
+    }
+}
+
+/* ==============================
+   Platform Features Section Fix
+   ============================== */
+
+.platform-features-section {
+    max-width: 1280px;
+    margin: 70px auto 40px auto;
+    padding: 0 32px;
+}
+
+.platform-features-header {
+    text-align: center;
+    margin-bottom: 42px;
+}
+
+.platform-features-header h2 {
+    font-size: 2.4rem;
+    font-weight: 800;
+    color: #111827;
+    margin-bottom: 10px;
+    letter-spacing: 0.04em;
+}
+
+.platform-features-header p {
+    font-size: 1.05rem;
+    color: #4b5563;
+    margin: 0;
+}
+
+.platform-features-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 30px;
+    align-items: stretch;
+}
+
+.platform-feature-card {
+    background: #ffffff;
+    border-radius: 24px;
+    padding: 34px 34px 30px 34px;
+    min-height: 210px;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.06);
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.platform-feature-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.10);
+}
+
+.platform-feature-icon {
+    width: 54px;
+    height: 54px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    margin-bottom: 28px;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+}
+
+.platform-feature-icon.blue {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+}
+
+.platform-feature-icon.pink {
+    background: linear-gradient(135deg, #ec4899, #f472b6);
+}
+
+.platform-feature-icon.green {
+    background: linear-gradient(135deg, #10b981, #34d399);
+}
+
+.platform-feature-icon.yellow {
+    background: linear-gradient(135deg, #f59e0b, #facc15);
+}
+
+.platform-feature-icon.cyan {
+    background: linear-gradient(135deg, #38bdf8, #22d3ee);
+}
+
+.platform-feature-icon.purple {
+    background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+}
+
+.platform-feature-card h3 {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #111827;
+    margin: 0 0 20px 0;
+}
+
+.platform-feature-card p {
+    font-size: 0.98rem;
+    line-height: 1.65;
+    color: #374151;
+    margin: 0;
+}
+
+.platform-stats-strip {
+    max-width: 1280px;
+    margin: 42px auto 30px auto;
+    padding: 34px 28px;
+    background: #ffffff;
+    border-radius: 24px;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.06);
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+    text-align: center;
+}
+
+.platform-stat h3 {
+    font-size: 2rem;
+    font-weight: 900;
+    color: #111827;
+    margin: 0 0 6px 0;
+}
+
+.platform-stat p {
+    font-size: 0.95rem;
+    color: #4b5563;
+    margin: 0;
+}
+
+/* Tablet */
+@media (max-width: 1024px) {
+    .platform-features-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .platform-stats-strip {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* Mobile */
+@media (max-width: 640px) {
+    .platform-features-section {
+        padding: 0 18px;
+        margin-top: 44px;
+    }
+
+    .platform-features-header h2 {
+        font-size: 1.8rem;
+    }
+
+    .platform-features-grid {
+        grid-template-columns: 1fr;
+        gap: 22px;
+    }
+
+    .platform-feature-card {
+        padding: 28px 24px;
+        min-height: auto;
+    }
+
+    .platform-stats-strip {
+        margin: 32px 18px 24px 18px;
+        grid-template-columns: 1fr;
+        padding: 28px 20px;
+    }
+}

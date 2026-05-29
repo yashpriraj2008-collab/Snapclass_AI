@@ -98,12 +98,55 @@ def _go_home() -> None:
     st.rerun()
 
 
+def _snapbot_page_key() -> str:
+    if role == "founder":
+        return st.session_state.get("founder_page", "founder_dashboard")
+    if role == "institute_admin":
+        institute_page = st.session_state.get("institute_page", "institute_dashboard")
+        admin_map = {
+            "institute_dashboard": "admin_dashboard",
+            "my_institute": "admin_dashboard",
+            "teachers": "admin_teachers",
+            "students": "admin_students",
+            "classes_subjects": "admin_classes",
+            "attendance": "teacher_attendance",
+            "analytics": "admin_dashboard",
+            "reports": "admin_dashboard",
+            "settings": "founder_settings",
+        }
+        return admin_map.get(institute_page, "admin_dashboard")
+    if role == "student":
+        student_page = st.session_state.get("student_page", "dashboard")
+        student_map = {
+            "dashboard": "student_dashboard",
+            "subjects": "student_subjects",
+            "history": "student_history",
+            "analytics": "student_reports",
+            "reports": "student_reports",
+            "faceid": "student_faceid",
+            "profile": "student_dashboard",
+        }
+        return student_map.get(student_page, "student_dashboard")
+    if role == "teacher":
+        teacher_page = st.session_state.get("teacher_page", "dashboard")
+        teacher_map = {
+            "dashboard": "teacher_dashboard",
+            "manual_att": "teacher_attendance",
+            "ai_att": "teacher_attendance",
+            "classes": "admin_classes",
+            "students": "admin_students",
+            "analytics": "teacher_reports",
+            "reports": "teacher_reports",
+        }
+        return teacher_map.get(teacher_page, "teacher_dashboard")
+    return page
+
+
 try:
-    # Ensure secrets are loaded (do not crash app if secrets.toml is missing)
-    try:
-        _ = dict(st.secrets)
-    except FileNotFoundError:
-        pass
+    # Supabase detection is handled lazily by src.database.client.
+    # Do not touch st.secrets directly here so demo mode stays clean when
+    # no secrets.toml is present.
+    pass
 
     # ── PUBLIC
     if page == "landing":
@@ -159,7 +202,7 @@ try:
             from src.screens.founder_institutes import render_founder_institutes
 
             render_founder_institutes()
-        elif fp == "founder_codes":
+        elif fp in {"founder_codes", "founder_allcodes"}:
             from src.screens.founder_codes import render_founder_codes
 
             render_founder_codes()
@@ -246,6 +289,7 @@ try:
         _go_home()
 
 except Exception as exc:
+    st.session_state["last_error"] = str(exc)
     st.error(f"⚠️ App error: {exc}")
     import traceback
 
@@ -256,11 +300,11 @@ except Exception as exc:
 
 
 # Render SnapBot globally on every page (must be outside all page conditions)
-render_snapbot_floating({
-    "role": st.session_state.get("role") or st.session_state.get("user_role") or "user",
-    "screen": st.session_state.get("page") or st.session_state.get("current_page") or "home",
-    "user_name": st.session_state.get("user_name") or st.session_state.get("name"),
-})
-
-
-
+render_snapbot_floating(
+    {
+        "current_role": st.session_state.get("role") or st.session_state.get("user_role") or "public",
+        "current_page": _snapbot_page_key(),
+        "current_user_name": st.session_state.get("user_name") or st.session_state.get("name"),
+        "last_error": st.session_state.get("last_error", ""),
+    }
+)

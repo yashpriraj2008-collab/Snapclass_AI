@@ -1,7 +1,47 @@
-"""Landing page — 4 portal cards + Platform Features section."""
+﻿"""Landing page â€” 4 portal cards + Platform Features section."""
 
 import streamlit as st
 from src.components.navigation import go_to
+
+
+
+def render_platform_features():
+    feature_cards = [
+        ("blue", "&#129302;", "AI Attendance", "Upload class photos - AI detects and marks student attendance automatically."),
+        ("pink", "&#128221;", "Manual Attendance", "Quick manual marking with class, subject, and date selection using editable tables."),
+        ("green", "&#127891;", "Student Portal", "Students can track attendance, view subjects, check history, and access reports."),
+        ("yellow", "&#128104;&#8205;&#127979;", "Teacher Dashboard", "Teachers can manage assigned classes, mark attendance, and view class analytics."),
+        ("cyan", "&#128202;", "Analytics & Reports", "Deep attendance insights with charts, trends, CSV export, and report summaries."),
+        ("purple", "&#127979;", "Institute Management", "Founders and admins manage institutes, access codes, users, plans, and operations."),
+    ]
+    stats = [
+        ("500+", "Students Enrolled"),
+        ("50+", "Teachers"),
+        ("10+", "Institutes"),
+        ("99%", "Uptime"),
+    ]
+
+    cards_html = "".join(
+        f'<div class="platform-feature-card"><div class="platform-feature-icon {color}">{icon}</div>'
+        f"<h3>{title}</h3><p>{description}</p></div>"
+        for color, icon, title, description in feature_cards
+    )
+    stats_html = "".join(
+        f'<div class="platform-stat"><h3>{value}</h3><p>{label}</p></div>'
+        for value, label in stats
+    )
+    html = (
+        '<section class="platform-features-section">'
+        '<div class="platform-features-header"><h2>Platform Features</h2>'
+        "<p>Everything your institute needs, one platform</p></div>"
+        f'<div class="platform-features-grid">{cards_html}</div>'
+        "</section>"
+        f'<section class="platform-stats-strip">{stats_html}</section>'
+    )
+    if hasattr(st, "html"):
+        st.html(html)
+    else:
+        st.markdown(html, unsafe_allow_html=True)
 
 
 def show_landing():
@@ -304,7 +344,7 @@ def show_landing():
 
     st.markdown('<div class="sc-landing-fix">', unsafe_allow_html=True)
 
-    # ── Navbar ──────────────────────────────────────────────────────────
+    # â”€â”€ Navbar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     nav = st.columns([2.5, 1, 1, 1, 1], gap="small")
     with nav[0]:
         st.markdown(
@@ -339,7 +379,7 @@ def show_landing():
         if st.button("Contact", use_container_width=True, key="nav_contact"):
             go_to("contact")
 
-    # ── Hero ────────────────────────────────────────────────────────────
+    # â”€â”€ Hero â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     st.markdown(
         """
         <div class="sc-hero">
@@ -353,17 +393,17 @@ def show_landing():
         unsafe_allow_html=True,
     )
 
-    # ── Portal Cards ─────────────────────────────────────────────────────
+    # â”€â”€ Portal Cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     st.markdown('<div class="portal-section">', unsafe_allow_html=True)
     st.markdown('<div class="sc-section-title">Choose Your Portal</div>', unsafe_allow_html=True)
     st.markdown('<div class="sc-section-subtitle">Pick the experience that matches your role</div>', unsafe_allow_html=True)
 
     c1, c2, c3, c4 = st.columns(4, gap="large")
     portals = [
-        (c1, "👨‍🎓", "Student Portal", "View attendance, subjects, and track your academic progress.", "linear-gradient(135deg,#5B6CFF,#6C7BFF)", "student_auth", "Enter Student Portal"),
-        (c2, "👩‍🏫", "Teacher Portal", "Mark attendance with AI, manage classes and student records.", "linear-gradient(135deg,#FF4FA3,#EC4899)", "teacher_auth", "Enter Teacher Portal"),
-        (c3, "🏫", "Institute Admin", "Manage your institute, teachers, students, classes and attendance.", "linear-gradient(135deg,#10B981,#22C55E)", "institute_login", "Enter Institute Admin"),
-        (c4, "🏢", "SnapClass HQ", "Founder control center to manage institutes and access codes.", "linear-gradient(135deg,#06B6D4,#3B82F6)", "founder_auth", "Enter SnapClass HQ"),
+        (c1, "&#127891;", "Student Portal", "View attendance, subjects, and track your academic progress.", "linear-gradient(135deg,#5B6CFF,#6C7BFF)", "student_auth", "Enter Student Portal"),
+        (c2, "&#128104;&#8205;&#127979;", "Teacher Portal", "Mark attendance with AI, manage classes and student records.", "linear-gradient(135deg,#FF4FA3,#EC4899)", "teacher_auth", "Enter Teacher Portal"),
+        (c3, "&#127979;", "Institute Admin", "Manage your institute, teachers, students, classes and attendance.", "linear-gradient(135deg,#10B981,#22C55E)", "institute_login", "Enter Institute Admin"),
+        (c4, "&#127970;", "SnapClass HQ", "Founder control center to manage institutes and access codes.", "linear-gradient(135deg,#06B6D4,#3B82F6)", "founder_auth", "Enter SnapClass HQ"),
     ]
 
     for col, icon, title, desc, grad, dest, btn_label in portals:
@@ -383,64 +423,15 @@ def show_landing():
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── Platform Features ─────────────────────────────────────────────────
-    st.markdown('<div class="sc-section-title">Platform Features</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sc-section-subtitle">Everything your institute needs in one platform</div>', unsafe_allow_html=True)
+    render_platform_features()
 
-    features = [
-        ("🤖", "linear-gradient(135deg,#5B6CFF,#818cf8)", "AI Attendance", "Upload class photos — AI detects and marks student attendance automatically."),
-        ("✏️", "linear-gradient(135deg,#FF4FA3,#f472b6)", "Manual Attendance", "Quick manual marking with class/subject/date selection and editable tables."),
-        ("👨‍🎓", "linear-gradient(135deg,#10B981,#34d399)", "Student Portal", "Students track attendance, view subjects, and get low-attendance alerts."),
-        ("👩‍🏫", "linear-gradient(135deg,#F59E0B,#fbbf24)", "Teacher Dashboard", "Teachers manage classes, mark attendance, and view class analytics."),
-        ("📊", "linear-gradient(135deg,#38BDF8,#7dd3fc)", "Analytics & Reports", "Deep attendance insights with charts, trends, and CSV/PDF export."),
-        ("🏫", "linear-gradient(135deg,#8B5CF6,#a78bfa)", "Institute Management", "Founders manage multiple institutes, generate access codes, and assign plans."),
-    ]
-
-    f1, f2, f3 = st.columns(3, gap="medium")
-    f4, f5, f6 = st.columns(3, gap="medium")
-
-    for col, (icon, grad, title, desc) in zip([f1, f2, f3, f4, f5, f6], features):
-        with col:
-            st.markdown(
-                f"""
-                <div class="sc-feat-card">
-                  <div class="sc-feat-icon" style="background:{grad};">{icon}</div>
-                  <h4 style="margin:0 0 8px;font-size:.95rem;">{title}</h4>
-                  <p style="color:#6B7280;font-size:.85rem;margin:0;line-height:1.5;">{desc}</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ── Stats ─────────────────────────────────────────────────────────────
-    st.markdown(
-        """
-        <div style="background:white;border:1px solid #E5E7EB;border-radius:24px;
-          padding:32px;box-shadow:0 8px 24px rgba(31,41,55,.06);">
-          <div style="display:flex;justify-content:space-around;flex-wrap:wrap;gap:20px;text-align:center;">
-            <div><div style="font-size:2rem;font-weight:900;color:#5B6CFF;font-family:Poppins,sans-serif;">500+</div>
-              <div style="color:#6B7280;font-size:.9rem;">Students Enrolled</div></div>
-            <div><div style="font-size:2rem;font-weight:900;color:#FF4FA3;font-family:Poppins,sans-serif;">50+</div>
-              <div style="color:#6B7280;font-size:.9rem;">Teachers</div></div>
-            <div><div style="font-size:2rem;font-weight:900;color:#10B981;font-family:Poppins,sans-serif;">10+</div>
-              <div style="color:#6B7280;font-size:.9rem;">Institutes</div></div>
-            <div><div style="font-size:2rem;font-weight:900;color:#F59E0B;font-family:Poppins,sans-serif;">99%</div>
-              <div style="color:#6B7280;font-size:.9rem;">Uptime</div></div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # ── Footer ────────────────────────────────────────────────────────────
+    # â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     st.markdown(
         """
         <div class="sc-footer">
-          <strong style="color:#5B6CFF;">SnapClass AI</strong> —
+          <strong style="color:#5B6CFF;">SnapClass AI</strong> -
           Built for schools, coaching institutes, teachers, and students.<br>
-          Python · Streamlit · Supabase
+          Python &middot; Streamlit &middot; Supabase
         </div>
         """,
         unsafe_allow_html=True,

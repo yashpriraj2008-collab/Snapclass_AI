@@ -11,34 +11,41 @@ UI is intentionally NOT modified in this file.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import streamlit as st
-from supabase import Client
-from supabase import create_client
+from supabase import Client, create_client
 
 _client: Client | None = None
 _checked: bool = False
 _last_error: str | None = None
 
 
-def _read_secrets():
-    """Read only the non-secret status required to create a client."""
-    url = st.secrets.get("SUPABASE_URL", "")
-    key = (
-        st.secrets.get("SUPABASE_KEY")
-        or st.secrets.get("SUPABASE_ANON_KEY")
-        or ""
-    )
-    return url, key
+def _secrets_path() -> Path:
+    return Path(__file__).resolve().parents[2] / ".streamlit" / "secrets.toml"
+
+
+def _read_secrets() -> tuple[str, str]:
+    """Read only the non-secret status required to create a client.
+
+    Avoid touching st.secrets when no secrets file exists so Streamlit does not
+    show the "No secrets found" warning banner in demo mode.
+    """
+    path = _secrets_path()
+    if not path.exists():
+        return "", ""
+
+    try:
+        url = st.secrets.get("SUPABASE_URL", "")
+        key = st.secrets.get("SUPABASE_KEY") or st.secrets.get("SUPABASE_ANON_KEY") or ""
+        return url, key
+    except Exception:
+        return "", ""
 
 
 def get_supabase_client() -> Client | None:
-    """Return a Supabase client or None.
-
-    This function:
-    - Creates the client only when secrets are present.
-    - Preserves the actual exception message in _last_error.
-    - Does not print or expose secret values.
-    """
+    """Return a Supabase client or None."""
     global _client, _checked, _last_error
 
     if _checked:
@@ -60,8 +67,6 @@ def get_supabase_client() -> Client | None:
             _last_error = "Invalid SUPABASE_URL (still contains your-project placeholder)"
             return None
 
-        from supabase import create_client
-
         _client = create_client(url, key)
         return _client
 
@@ -72,22 +77,17 @@ def get_supabase_client() -> Client | None:
 
 
 def debug_supabase_status() -> dict:
-    """Return required debug fields.
-
-    Required output fields:
-      - secrets_loaded: yes/no
-      - supabase_client_created: yes/no
-      - actual_backend_exception: <message>
-
-    Note: This returns status; it does not print UI.
-    """
-    # secrets loaded = keys exist (not necessarily valid)
-    try:
-        url_present = bool(st.secrets.get("SUPABASE_URL", ""))
-        key_present = bool(st.secrets.get("SUPABASE_KEY") or st.secrets.get("SUPABASE_ANON_KEY"))
-        secrets_loaded = "yes" if (url_present and key_present) else "no"
-    except Exception:
+    """Return required debug fields."""
+    path = _secrets_path()
+    if not path.exists():
         secrets_loaded = "no"
+    else:
+        try:
+            url_present = bool(st.secrets.get("SUPABASE_URL", ""))
+            key_present = bool(st.secrets.get("SUPABASE_KEY") or st.secrets.get("SUPABASE_ANON_KEY"))
+            secrets_loaded = "yes" if (url_present and key_present) else "no"
+        except Exception:
+            secrets_loaded = "no"
 
     client = None
     try:
@@ -96,8 +96,6 @@ def debug_supabase_status() -> dict:
         client = None
 
     supabase_client_created = "yes" if client is not None else "no"
-
-    # actual exception (from initialization attempt)
     err = _last_error or ""
 
     return {
@@ -148,4 +146,3 @@ def reset_client():
     _client = None
     _checked = False
     _last_error = None
-
