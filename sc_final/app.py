@@ -5,7 +5,9 @@ import streamlit as st
 
 from src.components.ui import load_css
 from src.components.keyboard import enable_enter_to_next_input
+from src.database.client import preflight_supabase_secrets
 from src.utils.session import init_session
+from src.utils.responsive_ui import inject_responsive_css
 from src.components.snapbot import render_snapbot_floating
 
 
@@ -20,7 +22,7 @@ st.set_page_config(
     page_title="SnapClass AI",
     page_icon="🎓",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 load_css()
 
@@ -80,11 +82,16 @@ input {
 """,
     unsafe_allow_html=True,
 )
+inject_responsive_css()
 
 init_session()
 
 if st.query_params.get("reset") == "1":
     st.session_state.clear()
+
+supabase_ready, _supabase_message = preflight_supabase_secrets(show_notice=True)
+if not supabase_ready:
+    st.stop()
 
 if "page" not in st.session_state:
     st.session_state.page = "landing"
@@ -101,7 +108,7 @@ def _go_home() -> None:
 def _snapbot_page_key() -> str:
     if role == "founder":
         return st.session_state.get("founder_page", "founder_dashboard")
-    if role == "institute_admin":
+    if role in {"institute_admin", "admin"}:
         institute_page = st.session_state.get("institute_page", "institute_dashboard")
         admin_map = {
             "institute_dashboard": "admin_dashboard",
@@ -142,11 +149,14 @@ def _snapbot_page_key() -> str:
     return page
 
 
+import traceback
+
 try:
     # Supabase detection is handled lazily by src.database.client.
     # Do not touch st.secrets directly here so demo mode stays clean when
     # no secrets.toml is present.
     pass
+
 
     # ── PUBLIC
     if page == "landing":
@@ -165,6 +175,22 @@ try:
         from src.screens.pricing import show_pricing
 
         show_pricing()
+    elif page == "demo_signup":
+        from src.screens.demo_signup import show_demo_signup
+
+        show_demo_signup()
+    elif page == "payment_success":
+        from src.screens.payment_success import show_payment_success
+
+        show_payment_success()
+    elif page == "payment_failed":
+        from src.screens.payment_failed import show_payment_failed
+
+        show_payment_failed()
+    elif page == "admin_billing":
+        from src.screens.admin_billing import show_admin_billing
+
+        show_admin_billing()
     elif page == "contact":
         from src.screens.contact import show_contact
 
@@ -186,6 +212,11 @@ try:
         from src.screens.institute_login import show_institute_login
 
         show_institute_login()
+    elif page == "institute_join":
+        enable_enter_to_next_input()
+        from src.screens.institute_join import show_institute_join
+
+        show_institute_join()
     elif page == "founder_auth":
         enable_enter_to_next_input()
         from src.screens.founder_auth import show_founder_auth
@@ -202,7 +233,11 @@ try:
             from src.screens.founder_institutes import render_founder_institutes
 
             render_founder_institutes()
-        elif fp in {"founder_codes", "founder_allcodes"}:
+        elif fp == "founder_codes":
+            from src.screens.founder_codes import render_founder_generate_code
+
+            render_founder_generate_code()
+        elif fp == "founder_allcodes":
             from src.screens.founder_codes import render_founder_codes
 
             render_founder_codes()
@@ -210,6 +245,10 @@ try:
             from src.screens.founder_plans import render_founder_plans
 
             render_founder_plans()
+        elif fp == "founder_leads":
+            from src.screens.founder_leads import render_founder_leads
+
+            render_founder_leads()
         elif fp == "founder_reports":
             from src.screens.founder_reports import render_founder_reports
 
@@ -231,7 +270,7 @@ try:
         show_institute_setup()
 
     # ── INSTITUTE ADMIN
-    elif role == "institute_admin":
+    elif role in {"institute_admin", "admin"}:
         from src.components.sidebar import institute_sidebar
 
         institute_sidebar()
@@ -286,17 +325,18 @@ try:
 
     # ── FALLBACK
     else:
-        _go_home()
+        st.warning("Please login first.")
+        if st.button("Go to Login", key="app_go_login"):
+            st.session_state.page = "landing"
+            st.rerun()
+        st.stop()
 
-except Exception as exc:
-    st.session_state["last_error"] = str(exc)
-    st.error(f"⚠️ App error: {exc}")
-    import traceback
+except Exception as e:
+    st.error("The app hit an unexpected error. Please retry or contact support.")
+    with st.expander("Developer Debug", expanded=False):
+        st.code(traceback.format_exc(), language="python")
+    st.stop()
 
-    with st.expander("Error details (for developer)"):
-        st.code(traceback.format_exc())
-    if st.button("🏠 Go to Home", key="err_home"):
-        _go_home()
 
 
 # Render SnapBot globally on every page (must be outside all page conditions)

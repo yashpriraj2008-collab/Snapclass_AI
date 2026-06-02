@@ -38,10 +38,7 @@ def render_platform_features():
         "</section>"
         f'<section class="platform-stats-strip">{stats_html}</section>'
     )
-    if hasattr(st, "html"):
-        st.html(html)
-    else:
-        st.markdown(html, unsafe_allow_html=True)
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def show_landing():
@@ -400,9 +397,9 @@ def show_landing():
 
     c1, c2, c3, c4 = st.columns(4, gap="large")
     portals = [
-        (c1, "&#127891;", "Student Portal", "View attendance, subjects, and track your academic progress.", "linear-gradient(135deg,#5B6CFF,#6C7BFF)", "student_auth", "Enter Student Portal"),
-        (c2, "&#128104;&#8205;&#127979;", "Teacher Portal", "Mark attendance with AI, manage classes and student records.", "linear-gradient(135deg,#FF4FA3,#EC4899)", "teacher_auth", "Enter Teacher Portal"),
-        (c3, "&#127979;", "Institute Admin", "Manage your institute, teachers, students, classes and attendance.", "linear-gradient(135deg,#10B981,#22C55E)", "institute_login", "Enter Institute Admin"),
+        (c1, "&#127891;", "I am a Student", "View attendance, subjects, and track your academic progress.", "linear-gradient(135deg,#5B6CFF,#6C7BFF)", "student_auth", "Enter Student Portal"),
+        (c2, "&#128104;&#8205;&#127979;", "I am a Teacher", "Mark attendance with AI, manage classes and student records.", "linear-gradient(135deg,#FF4FA3,#EC4899)", "teacher_auth", "Enter Teacher Portal"),
+        (c3, "&#127979;", "I am an Institute Admin", "Manage your institute, teachers, students, classes and attendance.", "linear-gradient(135deg,#10B981,#22C55E)", "institute_login", "Admin Login"),
         (c4, "&#127970;", "SnapClass HQ", "Founder control center to manage institutes and access codes.", "linear-gradient(135deg,#06B6D4,#3B82F6)", "founder_auth", "Enter SnapClass HQ"),
     ]
 
@@ -420,6 +417,13 @@ def show_landing():
             )
             if st.button(btn_label, key=f"portal_{dest}", use_container_width=True, type="primary"):
                 go_to(dest)
+            if dest == "institute_login":
+                if st.button("Start Free Demo", key="portal_demo_signup", use_container_width=True):
+                    st.session_state.return_to = "landing"
+                    go_to("demo_signup")
+                if st.button("Join Institute with Code", key="portal_join_institute", use_container_width=True):
+                    st.session_state.return_to = "landing"
+                    go_to("institute_join")
 
     st.markdown("<br>", unsafe_allow_html=True)
 

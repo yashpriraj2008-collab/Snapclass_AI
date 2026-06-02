@@ -11,10 +11,11 @@ WARNING   = "#F59E0B"
 DANGER    = "#EF4444"
 INFO      = "#38BDF8"
 
-ADMIN_PASSWORD = "admin123"
+# Production admin/founder access must use Supabase Auth and user_profiles.
+ADMIN_PASSWORD = ""
 
-DEMO_STUDENT = {"email": "student@snapclass.ai", "password": "student123", "name": "Yashraj Mehta", "roll": "SC001", "class_name": "12-A"}
-DEMO_TEACHER = {"email": "teacher@snapclass.ai", "password": "teacher123", "name": "Dr. Sharma",    "subject": "Mathematics"}
+DEMO_STUDENT = {"email": "student.demo@test.com", "password": "student123", "name": "Demo Student", "roll": "D001", "class_name": "12-A"}
+DEMO_TEACHER = {"email": "teacher.demo@test.com", "password": "teacher123", "name": "Demo Teacher", "subject": "Physics", "class_name": "12-A"}
 
 CARD_GRADIENTS = {
     "blue":   "linear-gradient(135deg,#5B6CFF,#818cf8)",

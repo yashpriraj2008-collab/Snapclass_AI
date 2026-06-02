@@ -1,6 +1,7 @@
 # Secrets
 .env
 .env.*
+!.env.example
 *.env
 .streamlit/secrets.toml
 **/.streamlit/secrets.toml
@@ -11,14 +12,28 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
 
 # Virtual environments
 venv/
 .venv/
+.venv311/
 env/
 ENV/
 **/venv/
 **/.venv/
+**/.venv311/
+
+# Debug / temporary
+debug_secrets_supabase.py
+print_paths.py
+*.bak
+TMP_*.py
+tmp_*.py
+*_patch.py
 
 # Build files
 *.egg-info/
@@ -35,6 +50,10 @@ Thumbs.db
 
 # Logs
 *.log
+*.err
+*.err.log
+streamlit_*.log
+streamlit_*.err.log
 
 # Large/generated files
 *.zip
@@ -59,4 +78,3 @@ sc_final_old_backup/
 snapclass_sc_final_p0_fixed/
 *_backup/
 *_old_backup/
-

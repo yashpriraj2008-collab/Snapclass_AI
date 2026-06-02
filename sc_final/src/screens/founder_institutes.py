@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from src.components.form_controls import format_institute_option, safe_selectbox
 from src.services.institute_service import (
     activate_institute,
     count_codes,
@@ -13,9 +14,6 @@ from src.services.institute_service import (
     init_institute_state,
     list_institutes,
 )
-
-
-
 from src.utils.session import nav_founder
 
 
@@ -23,12 +21,13 @@ def render_founder_institutes() -> None:
     """Render the institute management page for SnapClass HQ."""
     init_institute_state()
 
-    st.markdown("## Founder • Institutes")
+    st.markdown("## Founder - Institutes")
     st.caption("Create institutes, manage status, and generate access codes.")
 
+    institutes = list_institutes()
     total_institutes = count_institutes()
     total_codes = count_codes()
-    active_institutes = sum(1 for item in list_institutes() if item.get("status", "active") == "active")
+    active_institutes = sum(1 for item in institutes if item.get("status", "active") == "active")
     disabled_institutes = max(total_institutes - active_institutes, 0)
 
     c1, c2, c3, c4 = st.columns(4)
@@ -39,12 +38,12 @@ def render_founder_institutes() -> None:
 
     st.divider()
 
-    if st.button("← Back to Dashboard", use_container_width=True, key="founder_institutes_back"):
+    if st.button("<- Back to Dashboard", use_container_width=True, key="founder_institutes_back"):
         nav_founder("founder_dashboard")
 
     st.divider()
 
-    with st.expander("➕ Add New Institute", expanded=True):
+    with st.expander("Add New Institute", expanded=True):
         institute_types = ["School", "Coaching", "Tuition", "College"]
         plans = ["Free Demo", "Starter", "Pro", "Enterprise"]
 
@@ -52,29 +51,31 @@ def render_founder_institutes() -> None:
             col1, col2 = st.columns(2)
             name = col1.text_input("Institute Name", placeholder="Sunrise Academy")
             city = col2.text_input("City", placeholder="Mumbai")
+
             col3, col4 = st.columns(2)
             state = col3.text_input("State", placeholder="Maharashtra")
-            institute_type = col4.selectbox(
-                "Institute Type",
-                options=institute_types,
-                index=0,
-                key="hq_institute_type",
-                label_visibility="visible",
-            )
+            with col4:
+                institute_type = safe_selectbox(
+                    "Institute Type",
+                    institute_types,
+                    key="founder_add_institute_type",
+                )
             st.caption(f"Selected institute type: {institute_type}")
+
             address = st.text_area("Full Address", height=90, placeholder="Address line")
+
             col5, col6 = st.columns(2)
             admin_name = col5.text_input("Admin Name", placeholder="Priya Sharma")
             admin_email = col6.text_input("Admin Email", placeholder="admin@example.com")
+
             col7, col8 = st.columns(2)
             admin_phone = col7.text_input("Admin Phone", placeholder="+91 98765 43210")
-            plan = col8.selectbox(
-                "Plan",
-                options=plans,
-                index=0,
-                key="hq_plan",
-                label_visibility="visible",
-            )
+            with col8:
+                plan = safe_selectbox(
+                    "Plan",
+                    plans,
+                    key="founder_add_institute_plan",
+                )
             st.caption(f"Selected plan: {plan}")
 
             col9, col10 = st.columns(2)
@@ -82,7 +83,7 @@ def render_founder_institutes() -> None:
             threshold = col10.number_input("Attendance Threshold (%)", min_value=50, max_value=100, value=75)
 
             submitted = st.form_submit_button(
-                "✅ Create Institute & Generate Code",
+                "Create Institute & Generate Code",
                 type="primary",
                 use_container_width=True,
             )
@@ -91,18 +92,16 @@ def render_founder_institutes() -> None:
                 if not name or not city:
                     st.error("Institute name and city are required.")
                 else:
-                    # Optional: help user understand why the form might not persist.
-                    # (We handle schema-cache errors gracefully without crashing.)
                     form_data = {
                         "name": name,
                         "city": city,
                         "state": state,
                         "address": address,
-                        "institute_type": institute_type,
+                        "institute_type": institute_type or "School",
                         "admin_name": admin_name,
                         "admin_email": admin_email,
                         "admin_phone": admin_phone,
-                        "plan": plan,
+                        "plan": plan or "Free Demo",
                         "status": "active",
                         "attendance_threshold": int(threshold),
                         "academic_year": academic_year,
@@ -114,27 +113,45 @@ def render_founder_institutes() -> None:
                         st.success(result.get("message", "Institute created."))
                         st.rerun()
                     else:
-                        msg = result.get("message", "Failed to create institute.")
-                        st.exception(Exception(msg))
+                        st.error("Institute could not be created. Please check the database setup and try again.")
+                        if result.get("debug") or result.get("error"):
+                            with st.expander("Developer Debug", expanded=False):
+                                st.code(str(result.get("debug") or result.get("error")))
 
     st.divider()
 
     st.subheader("Generate Access Code")
     institutes = list_institutes()
     if not institutes:
-        st.info("Create an institute first.")
+        st.info("No institutes found. Add an institute first.")
     else:
         with st.form("generate_code_form"):
-            institute_label_map = {
-                f"{item.get('name', 'Unnamed')} • {item.get('city', '')}": item for item in institutes
-            }
-            selected_label = st.selectbox("Institute", list(institute_label_map.keys()))
-            admin_email = st.text_input("Admin Email for Code", placeholder="admin@example.com")
+            institute = safe_selectbox(
+                "Institute",
+                institutes,
+                key="founder_generate_code_institute",
+                format_func=format_institute_option,
+                index=None,
+                placeholder="Choose an institute",
+                show_selected=False,
+            )
+            if institute:
+                st.success(f"Selected Institute: {institute.get('name', 'Unnamed Institute')}")
+            else:
+                st.info("Select an institute to generate an access code.")
+            admin_email = st.text_input(
+                "Admin Email for Code",
+                value=str((institute or {}).get("admin_email") or "").strip(),
+                placeholder="admin@example.com",
+            )
             expires_days = st.number_input("Code expiry (days)", min_value=1, max_value=365, value=30)
 
             submitted = st.form_submit_button("Generate Code")
             if submitted:
-                institute = institute_label_map[selected_label]
+                if not institute:
+                    st.warning("Select an institute to generate an access code.")
+                    return
+
                 result = create_access_code(
                     institute.get("id", ""),
                     admin_email=admin_email,
@@ -143,7 +160,7 @@ def render_founder_institutes() -> None:
                 if result.get("ok"):
                     code_value = (result.get("data") or {}).get("code", "")
                     if code_value:
-                        st.success("✅ Institute Access Code generated.")
+                        st.success("Institute Access Code generated.")
                         st.code(code_value)
                     else:
                         st.success(result.get("message", "Access code generated."))
@@ -158,45 +175,42 @@ def render_founder_institutes() -> None:
     st.divider()
     st.subheader("All Institutes")
 
+    institutes = list_institutes()
     if not institutes:
         st.info("No institutes found.")
         return
 
     for institute in institutes:
         status = institute.get("status", "active")
-        badge_class = "ok" if status == "active" else "danger"
-        left, right = st.columns([4, 1])
-        with left:
-            st.markdown(
-                f"""
-                <div class="sc-subject-card">
-                  <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;">
-                    <div>
-                      <h4 style="margin:0 0 4px;">{institute.get("name", "Unnamed Institute")}</h4>
-                      <p style="margin:0;">{institute.get("city", "")} {institute.get("state", "")}</p>
-                      <p style="margin:6px 0 0;">Admin: {institute.get("admin_name", "—")} ({institute.get("admin_email", "—")})</p>
-                      <p style="margin:6px 0 0;">Plan: {institute.get("plan", "Demo")} • Type: {institute.get("institute_type", "School")}</p>
-                    </div>
-                    <span class="sc-badge {badge_class}">{status.title()}</span>
-                  </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        with right:
-            if status == "active":
-                if st.button("Deactivate", key=f"founder_deactivate_{institute.get('id')}"):
-                    result = deactivate_institute(institute.get("id", ""))
-                    if result["ok"]:
-                        st.success(result["message"])
-                        st.rerun()
-                    else:
-                        st.error(result["message"])
-            else:
-                if st.button("Activate", key=f"founder_activate_{institute.get('id')}"):
-                    result = activate_institute(institute.get("id", ""))
-                    if result["ok"]:
-                        st.success(result["message"])
-                        st.rerun()
-                    else:
-                        st.error(result["message"])
+        with st.container(border=True):
+            left, right = st.columns([4, 1])
+            with left:
+                st.markdown(f"#### {institute.get('name', 'Unnamed Institute')}")
+                st.write(f"{institute.get('city', '')} {institute.get('state', '')}".strip())
+                st.write(
+                    f"Admin: {institute.get('admin_name') or '-'} "
+                    f"({institute.get('admin_email') or '-'})"
+                )
+                st.write(
+                    f"Plan: {institute.get('plan', 'Demo')} | "
+                    f"Type: {institute.get('institute_type', 'School')}"
+                )
+            with right:
+                if status == "active":
+                    st.success("Active")
+                    if st.button("Deactivate", key=f"founder_deactivate_{institute.get('id')}"):
+                        result = deactivate_institute(institute.get("id", ""))
+                        if result["ok"]:
+                            st.success(result["message"])
+                            st.rerun()
+                        else:
+                            st.error(result["message"])
+                else:
+                    st.error(str(status).title())
+                    if st.button("Activate", key=f"founder_activate_{institute.get('id')}"):
+                        result = activate_institute(institute.get("id", ""))
+                        if result["ok"]:
+                            st.success(result["message"])
+                            st.rerun()
+                        else:
+                            st.error(result["message"])

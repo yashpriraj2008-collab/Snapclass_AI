@@ -10,3 +10,7 @@ def go_to(page: str, role: str = None):
 def back_to_home():
     st.session_state.page = "landing"
     st.rerun()
+
+def render_back_to_home(key: str = "back_to_home"):
+    if st.button("← Back to Home", key=key):
+        go_to("landing")

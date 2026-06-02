@@ -4,10 +4,14 @@ from io import BytesIO
 from typing import Any, Dict, List, Optional
 
 import qrcode
+import streamlit as st
 
 
-def make_join_code(prefix: str = "SC", length: int = 5) -> str:
-    random_part = "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
+def make_join_code(prefix: str = "SC", length: int = 6) -> str:
+    """Join code format: SC- + 6 uppercase alphanumerics."""
+    random_part = "".join(
+        random.choices(string.ascii_uppercase + string.digits, k=length)
+    )
     return f"{prefix}-{random_part}"
 
 
@@ -88,19 +92,88 @@ def create_subject(supabase, payload: Dict[str, Any]):
     return _fetch_subject_after_write(supabase, clean)
 
 
-def get_teacher_subjects(
-    supabase, teacher_id: Optional[str] = None, teacher_email: Optional[str] = None
-) -> List[Dict[str, Any]]:
-    query = supabase.table("subjects").select("*")
+def get_teacher_subjects(supabase, teacher_id: Optional[str]) -> List[Dict[str, Any]]:
+    """Return subjects assigned to a teacher via public.teacher_assignments.
 
-    if teacher_id:
-        query = query.eq("teacher_id", teacher_id)
-    elif teacher_email:
-        # Keep this fallback for older tables if teacher_email exists.
-        query = query.eq("teacher_email", teacher_email)
+    Required mapping:
+      - teacher_assignments.teacher_id must match public.teachers.id
+      - fetch class from public.classes using class_id
+      - fetch subject from public.subjects using subject_id
 
-    result = query.execute()
-    return result.data or []
+    Output fields include (best-effort for assignment_type):
+      assignment_id, teacher_id, class_id, class_name, section,
+      subject_id, subject_name, subject_code, assignment_type
+    """
+    if not supabase or not teacher_id:
+        return []
+
+    # Load assignments first, then hydrate classes/subjects.
+    assignments = (
+        supabase.table("teacher_assignments")
+        .select("id, teacher_id, class_id, subject_id, assignment_type")
+        .eq("teacher_id", teacher_id)
+        .execute()
+    ).data or []
+
+    if not assignments:
+        return []
+
+    class_ids = sorted(
+        {str(a.get("class_id")) for a in assignments if a.get("class_id")}
+    )
+    subject_ids = sorted(
+        {str(a.get("subject_id")) for a in assignments if a.get("subject_id")}
+    )
+
+    classes_by_id: Dict[str, Dict[str, Any]] = {}
+    if class_ids:
+        classes_rows = (
+            supabase.table("classes")
+            .select("id, class_name, name, section")
+            .in_("id", class_ids)
+            .execute()
+        ).data or []
+        for c in classes_rows:
+            classes_by_id[str(c.get("id"))] = c
+
+    subjects_by_id: Dict[str, Dict[str, Any]] = {}
+    if subject_ids:
+        subject_rows = (
+            supabase.table("subjects")
+            .select("id, subject_name, name, subject_code, code, class_id")
+            .in_("id", subject_ids)
+            .execute()
+        ).data or []
+        for s in subject_rows:
+            subjects_by_id[str(s.get("id"))] = s
+
+    out: List[Dict[str, Any]] = []
+    for a in assignments:
+        class_id = a.get("class_id")
+        subject_id = a.get("subject_id")
+        c = classes_by_id.get(str(class_id), {})
+        s = subjects_by_id.get(str(subject_id), {})
+
+        class_name = c.get("class_name") or c.get("name") or "Class"
+        section = c.get("section") or ""
+        subject_name = s.get("subject_name") or s.get("name") or "Subject"
+        subject_code = s.get("subject_code") or s.get("code") or ""
+
+        out.append(
+            {
+                "assignment_id": a.get("id"),
+                "teacher_id": a.get("teacher_id"),
+                "class_id": class_id,
+                "class_name": class_name,
+                "section": section,
+                "subject_id": subject_id,
+                "subject_name": subject_name,
+                "subject_code": subject_code,
+                "assignment_type": a.get("assignment_type") or a.get("status") or "assigned",
+            }
+        )
+
+    return out
 
 
 def get_subject_by_name(
@@ -155,39 +228,84 @@ def generate_subject_join_code(
     supabase,
     subject_id,
     teacher_id: Optional[str] = None,
-    base_url: str = "http://localhost:8507",
+    base_url: Optional[str] = None,
 ):
-    for _ in range(5):
-        code = make_join_code()
-        existing = (
-            supabase.table("subject_join_codes")
-            .select("id")
-            .eq("join_code", code)
-            .limit(1)
-            .execute()
-        )
-        if existing.data:
-            continue
+    """Create or fetch an active join code for a subject.
 
-        join_url = f"{base_url}?join_code={code}"
-        payload = {
-            "subject_id": subject_id,
-            "teacher_id": teacher_id,
-            "join_code": code,
-            "join_url": join_url,
-            "is_active": True,
-        }
+    Phase 1 expectations:
+      - Join code: SC- + 6 uppercase random chars
+      - Join link: http://localhost:8507/?join-code=<JOIN_CODE>
+    """
 
-        supabase.table("subject_join_codes").insert(payload).execute()
-        created = (
+    base_url = (base_url or st.secrets.get("APP_PUBLIC_URL", "") or "").strip().rstrip("/")
+    if not base_url:
+        base_url = "http://localhost:8507"
+
+    # Prefer existing active join code for (subject_id, teacher_id)
+    # (If teacher_id is missing, fall back to subject-only lookup).
+    try:
+        query = (
             supabase.table("subject_join_codes")
             .select("*")
-            .eq("join_code", code)
+            .eq("subject_id", subject_id)
+            .eq("is_active", True)
             .limit(1)
-            .execute()
         )
-        if created.data:
-            return created.data[0]
+        if teacher_id is not None:
+            query = query.eq("teacher_id", teacher_id)
+
+        existing = query.execute().data or []
+        if existing:
+            row = existing[0]
+            join_code = row.get("join_code") or ""
+            if not row.get("join_url") and join_code:
+                row["join_url"] = f"{base_url}/?join-code={join_code}"
+            return row
+    except Exception:
+        pass
+
+    # Create one.
+    for _ in range(8):
+        code = make_join_code()
+        try:
+            # Prevent collisions.
+            collision = (
+                supabase.table("subject_join_codes")
+                .select("id")
+                .eq("join_code", code)
+                .limit(1)
+                .execute()
+            ).data
+            if collision:
+                continue
+
+            join_url = f"{base_url}/?join-code={code}"
+
+            payload: Dict[str, Any] = {
+                "subject_id": subject_id,
+                "teacher_id": teacher_id,
+                "join_code": code,
+                "join_url": join_url,
+                "is_active": True,
+            }
+            # If teacher_id is None but schema requires it, insertion will fail and
+            # we will keep trying with a new code (or fall through).
+
+            # Insert: NO insert().select().execute()
+            supabase.table("subject_join_codes").insert(payload).execute()
+
+            # Re-query separately.
+            created = (
+                supabase.table("subject_join_codes")
+                .select("*")
+                .eq("join_code", code)
+                .limit(1)
+                .execute()
+            ).data or []
+            if created:
+                return created[0]
+        except Exception:
+            continue
 
     return None
 

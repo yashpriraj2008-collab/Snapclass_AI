@@ -1,7 +1,12 @@
-"""Teacher portal — all pages."""
+﻿"""Teacher portal — all pages."""
 import streamlit as st
 import plotly.express as px
 from datetime import date
+import html
+import os
+import tomllib
+from pathlib import Path
+from typing import Any
 
 from src.components.sidebar import teacher_sidebar
 from src.components.ui import db_status_banner
@@ -74,11 +79,132 @@ def _get_current_teacher_id():
 
 
 def _get_current_institute_id():
+    current = st.session_state.get("current_institute")
+    current_id = current.get("id") if isinstance(current, dict) else current
     return (
         st.session_state.get("institute_id")
-        or st.session_state.get("current_institute")
+        or current_id
         or st.session_state.get("current_institute_id")
     )
+
+
+def _debug_enabled() -> bool:
+    if bool(st.session_state.get("debug_mode")):
+        return True
+    app_env = str(os.getenv("APP_ENV") or "").strip().lower()
+    if not app_env:
+        secrets_path = Path(__file__).resolve().parents[2] / ".streamlit" / "secrets.toml"
+        try:
+            if secrets_path.exists():
+                with secrets_path.open("rb") as fh:
+                    app_env = str(tomllib.load(fh).get("APP_ENV", "")).strip().lower()
+        except Exception:
+            app_env = ""
+    return app_env == "development"
+
+
+def _show_debug(title: str, data: Any) -> None:
+    if not _debug_enabled():
+        return
+    with st.expander(title, expanded=False):
+        if isinstance(data, str):
+            st.code(data)
+        else:
+            st.write(data)
+
+
+def _class_id(row: dict | None) -> str:
+    if not isinstance(row, dict):
+        return ""
+    return str(row.get("id") or row.get("class_id") or "").strip()
+
+
+def _subject_id(row: dict | None) -> str:
+    if not isinstance(row, dict):
+        return ""
+    return str(row.get("subject_id") or row.get("id") or "").strip()
+
+
+def _subject_label(subject: dict | None) -> str:
+    if not subject:
+        return "Select subject"
+    name = subject.get("subject_name") or subject.get("name") or subject.get("title") or "Unnamed Subject"
+    code = subject.get("subject_code") or subject.get("code") or ""
+    return f"{name} ({code})" if code else str(name)
+
+
+def _assignment_class(row: dict) -> dict:
+    class_row = row.get("classes") if isinstance(row.get("classes"), dict) else {}
+    class_row = dict(class_row or {})
+    if row.get("class_id") and not class_row.get("id"):
+        class_row["id"] = row.get("class_id")
+    return class_row
+
+
+def _assignment_subject(row: dict) -> dict | None:
+    subject_id = row.get("subject_id")
+    if not subject_id:
+        return None
+    subject = row.get("subjects") if isinstance(row.get("subjects"), dict) else {}
+    subject = dict(subject or {})
+    subject.setdefault("id", subject_id)
+    subject.setdefault("subject_id", subject_id)
+    subject.setdefault("class_id", row.get("class_id"))
+    return subject
+
+
+def _unique_assignment_classes(assignments: list[dict]) -> list[dict]:
+    classes: list[dict] = []
+    seen: set[str] = set()
+    for row in assignments:
+        class_row = _assignment_class(row)
+        cid = _class_id(class_row) or str(row.get("class_id") or "")
+        if not cid or cid in seen:
+            continue
+        seen.add(cid)
+        classes.append(class_row)
+    return classes
+
+
+def _assignment_subjects_for_class(assignments: list[dict], class_id: str) -> list[dict]:
+    subjects: list[dict] = []
+    seen: set[str] = set()
+    for row in assignments:
+        if str(row.get("class_id") or "") != str(class_id):
+            continue
+        subject = _assignment_subject(row)
+        if not subject:
+            continue
+        sid = _subject_id(subject)
+        if sid and sid not in seen:
+            seen.add(sid)
+            subjects.append(subject)
+    return subjects
+
+
+def _assignments_missing_subject_for_class(assignments: list[dict], class_id: str) -> bool:
+    return any(str(row.get("class_id") or "") == str(class_id) and not row.get("subject_id") for row in assignments)
+
+
+def _load_students_for_classes(supabase, institute_id: str, class_ids: list[str]) -> list[dict]:
+    if not supabase or not class_ids:
+        return []
+    try:
+        query = supabase.table("students").select("*").in_("class_id", class_ids)
+        if institute_id:
+            query = query.eq("institute_id", institute_id)
+        return query.execute().data or []
+    except Exception:
+        rows: list[dict] = []
+        for class_id in class_ids:
+            try:
+                query = supabase.table("students").select("*").eq("class_id", class_id)
+                if institute_id:
+                    query = query.eq("institute_id", institute_id)
+                rows.extend(query.execute().data or [])
+            except Exception:
+                continue
+        return rows
 
 
 def _load_teacher_classes(supabase):
@@ -94,28 +220,9 @@ def _load_teacher_classes(supabase):
 
     try:
         assignments = get_teacher_assignments(supabase, teacher_id)
-        nested_classes = [
-            row.get("classes")
-            for row in assignments
-            if isinstance(row.get("classes"), dict)
-        ]
-        if nested_classes:
-            return nested_classes
-
-        class_ids = sorted({row.get("class_id") for row in assignments if row.get("class_id")})
-        if not class_ids:
-            return []
-
-        classes_res = (
-            supabase.table("classes")
-            .select("*")
-            .in_("id", class_ids)
-            .order("created_at", desc=False)
-            .execute()
-        )
-        return classes_res.data or []
+        return _unique_assignment_classes(assignments)
     except Exception as e:
-        st.warning(f"Could not load assigned classes: {e}")
+        _show_debug("Developer Debug", str(e))
 
     return []
 
@@ -271,20 +378,32 @@ def _dashboard():
 
 
 def _manual_att():
-    st.markdown("## 📝 Manual Attendance")
+    st.markdown("## Manual Attendance")
 
-    from src.services.attendance_service import mark_manual_attendance
+    _show_debug(
+        "Developer Debug",
+        {
+            "current_page": "teacher_manual_att",
+            "auth_user_id": st.session_state.get("auth_user_id"),
+            "teacher_id": st.session_state.get("teacher_id"),
+            "institute_id": st.session_state.get("institute_id"),
+            "role": st.session_state.get("role"),
+            "user_email": st.session_state.get("user_email"),
+        },
+    )
+
     from src.database.client import get_supabase_client
+    from src.services.attendance_service import mark_manual_attendance
     from src.services.teacher_service import get_teacher_assignments, resolve_teacher_identity
 
     supabase = get_supabase_client()
-
     if not supabase:
         st.error("Supabase is not connected.")
         return
 
-    teacher = resolve_teacher_identity(supabase)
+    teacher = resolve_teacher_identity(supabase, show_error=False)
     if not teacher:
+        st.warning("Please login first.")
         st.stop()
 
     teacher_id = teacher["id"]
@@ -293,167 +412,116 @@ def _manual_att():
         st.info("No assigned classes or subjects found for this teacher.")
         return
 
-    try:
-        class_ids = sorted({a.get("class_id") for a in assignments if a.get("class_id")})
-        subject_ids = sorted({a.get("subject_id") for a in assignments if a.get("subject_id")})
-        if not class_ids:
-            st.info("No assigned classes found for this teacher.")
-            return
-
-        classes = [
-            a.get("classes")
-            for a in assignments
-            if isinstance(a.get("classes"), dict)
-        ]
-        subjects = [
-            a.get("subjects")
-            for a in assignments
-            if isinstance(a.get("subjects"), dict)
-        ]
-
-        if not classes and class_ids:
-            classes_res = supabase.table("classes").select("*").in_("id", class_ids).execute()
-            classes = classes_res.data or []
-        if not subjects and subject_ids:
-            subjects_res = supabase.table("subjects").select("*").in_("id", subject_ids).execute()
-            subjects = subjects_res.data or []
-        students_res = supabase.table("students").select("*").in_("class_id", class_ids).execute()
-        students = students_res.data or []
-
-    except Exception as e:
-        st.error(f"Failed to load data from Supabase: {e}")
+    classes = _unique_assignment_classes(assignments)
+    class_ids = [_class_id(row) for row in classes if _class_id(row)]
+    if not class_ids:
+        st.info("No assigned classes found for this teacher.")
         return
 
-    if not classes:
-        st.warning("No classes found. Add classes first.")
-        return
-
-    if not subjects:
-        st.warning("No subjects found. Add subjects first.")
-        return
-
-    if not students:
-        st.warning("No students found. Add students first.")
-        return
+    institute_id = str(_get_current_institute_id() or "")
+    students = _load_students_for_classes(supabase, institute_id, class_ids)
 
     def class_label(c):
         if not c:
             return "Select class"
         name = c.get("name") or c.get("class_name") or c.get("grade") or ""
         section = c.get("section") or ""
-        return f"{name} — {section}".strip(" —") or "Unnamed Class"
-
-    def subject_label(s):
-        if not s:
-            return "Select subject"
-        return s.get("name") or s.get("subject_name") or s.get("title") or "Unnamed Subject"
-
+        return f"{name} - {section}".strip(" -") or "Unnamed Class"
 
     col1, col2, col3 = st.columns(3)
+    requested_class_id = str(st.session_state.get("selected_teacher_class_id") or "")
+    class_index = 0
+    for index, class_row in enumerate(classes):
+        if requested_class_id and _class_id(class_row) == requested_class_id:
+            class_index = index
+            break
 
     with col1:
         selected_class = st.selectbox(
             "Class",
             classes,
             format_func=class_label,
+            index=class_index,
             key="manual_class_selectbox",
         )
+
+    selected_class_id = _class_id(selected_class)
+    subjects = _assignment_subjects_for_class(assignments, selected_class_id)
+    if not subjects:
+        if _assignments_missing_subject_for_class(assignments, selected_class_id):
+            st.warning("Teacher is assigned to this class but no subject is linked. Please assign a subject.")
+        else:
+            st.warning("No subjects assigned to this class yet.")
+        return
+
+    requested_subject_id = str(st.session_state.get("selected_teacher_subject_id") or "")
+    subject_index = 0
+    for index, subject_row in enumerate(subjects):
+        if requested_subject_id and _subject_id(subject_row) == requested_subject_id:
+            subject_index = index
+            break
 
     with col2:
         selected_subject = st.selectbox(
             "Subject",
             subjects,
-            format_func=subject_label,
+            format_func=_subject_label,
+            index=subject_index,
             key="manual_subject_selectbox",
         )
 
     with col3:
-        selected_date = st.date_input(
-            "Date",
-            value=date.today(),
-            key="manual_attendance_date",
-        )
+        selected_date = st.date_input("Date", value=date.today(), key="manual_attendance_date")
 
-    selected_class_id = selected_class.get("id")
-    selected_subject_id = selected_subject.get("id")
-
+    selected_subject_id = _subject_id(selected_subject)
     class_name = class_label(selected_class)
-    subject_name = subject_label(selected_subject)
+    subject_name = _subject_label(selected_subject)
 
+    st.caption(f"Selected Class: {class_name}")
+    st.caption(f"Selected Subject: {subject_name}")
 
-    class_students = [
-        s
-        for s in students
-        if str(s.get("class_id")) == str(selected_class_id)
-        or str(s.get("class")) == str(class_name)
-        or str(s.get("class_name")) == str(class_name)
-    ]
-
-
+    class_students = [s for s in students if str(s.get("class_id")) == str(selected_class_id)]
     if not class_students:
-        st.warning(f"No students found for {class_name}.")
+        st.warning("No students found for this class.")
         return
 
-    st.markdown(
-        f"### {subject_name} — {class_name} — {selected_date} ({len(class_students)} students)"
-    )
+    st.markdown(f"### {subject_name} - {class_name} - {selected_date} ({len(class_students)} students)")
 
     attendance_records = []
     present_count = 0
-
     for student in class_students:
         student_id = student.get("id")
-        roll = (
-            student.get("roll")
-            or student.get("roll_no")
-            or student.get("student_code")
-            or "-"
-        )
+        roll = student.get("roll") or student.get("roll_no") or student.get("student_code") or "-"
         name = student.get("name") or student.get("full_name") or "Student"
-
         is_present = st.checkbox(
-            f"{roll} — {name}",
+            f"{roll} - {name}",
             value=True,
             key=f"manual_present_{student_id}_{selected_class_id}_{selected_subject_id}_{selected_date}",
         )
-
         if is_present:
             present_count += 1
-
-        attendance_records.append(
-            {
-                "student_id": student_id,
-                "class_id": selected_class_id,
-                "subject_id": selected_subject_id,
-                "attendance_date": str(selected_date),
-                "status": "present" if is_present else "absent",
-                "marked_by": st.session_state.get("user_id") or st.session_state.get("teacher_id"),
-            }
-        )
+        attendance_records.append({"student_id": student_id, "status": "present" if is_present else "absent"})
 
     c1, c2 = st.columns(2)
     c1.metric("Present", present_count)
     c2.metric("Absent", len(class_students) - present_count)
 
-    if st.button("💾 Save", key="save_manual_attendance"):
+    if st.button("Save", key="save_manual_attendance"):
         ok, message, saved_count, errors = mark_manual_attendance(
             supabase=supabase,
             teacher_id=teacher_id,
             class_id=selected_class_id,
             subject_id=selected_subject_id,
             attendance_date=str(selected_date),
-            records=[
-                {"student_id": row.get("student_id"), "status": row.get("status")}
-                for row in attendance_records
-            ],
+            institute_id=institute_id,
+            records=attendance_records,
         )
-
         if ok:
-            st.success(f"✅ {saved_count} records saved to Supabase.")
+            st.success(f"{saved_count} records saved to Supabase.")
             if errors:
                 st.warning(f"{len(errors)} row(s) skipped: {', '.join(errors[:3])}")
         else:
-            st.error(f"❌ Attendance not saved: {message}")
+            st.error(f"Attendance not saved: {message}")
             if errors:
                 st.caption("; ".join(errors[:5]))
 
@@ -677,344 +745,230 @@ def _ai_review():
 
 def _classes():
     db_status_banner()
-    st.markdown("### 🏫 My Classes")
+    st.markdown("### My Classes")
+
+    _show_debug(
+        "Developer Debug",
+        {
+            "current_page": "teacher_classes",
+            "auth_user_id": st.session_state.get("auth_user_id"),
+            "teacher_id": st.session_state.get("teacher_id"),
+            "institute_id": st.session_state.get("institute_id"),
+            "role": st.session_state.get("role"),
+            "user_email": st.session_state.get("user_email"),
+        },
+    )
 
     try:
         from src.database.client import get_supabase_client
-    except Exception:
-        get_supabase_client = None
+        from src.services.subject_service import generate_subject_join_code
+        from src.services.teacher_service import get_teacher_assignments, resolve_teacher_identity
+    except Exception as exc:
+        st.error("Teacher classes could not be loaded.")
+        _show_debug("Developer Debug", str(exc))
+        return
 
-    supabase = get_supabase_client() if get_supabase_client else None
-    classes = []
+    supabase = get_supabase_client()
+    if not supabase:
+        st.warning("Supabase is not configured. Add .streamlit/secrets.toml.")
+        return
 
-    if supabase:
-        try:
-            classes_res = supabase.table("classes").select("*").order("created_at", desc=False).execute()
-            classes = classes_res.data or []
-        except Exception as e:
-            st.warning(f"Could not load classes from Supabase: {e}")
+    teacher = resolve_teacher_identity(supabase, show_error=False)
+    if not teacher:
+        st.warning("Please login first.")
+        return
 
+    teacher_id = teacher.get("id") or st.session_state.get("teacher_id")
+    assignments = get_teacher_assignments(supabase, teacher_id)
+    if not assignments:
+        st.info("Your account has no assigned classes yet. Ask institute admin to assign a class and subject.")
+        return
+
+    classes = _unique_assignment_classes(assignments)
     if not classes:
-        classes = _load_teacher_classes(supabase)
+        st.info("Your account has no assigned classes yet. Ask institute admin to assign a class and subject.")
+        return
 
-    if not classes:
-        classes = CLASSES.to_dict("records") if hasattr(CLASSES, "to_dict") else []
+    class_ids = [_class_id(row) for row in classes if _class_id(row)]
+    students = _load_students_for_classes(supabase, str(_get_current_institute_id() or ""), class_ids)
+    student_count_by_class = {}
+    for student in students:
+        cid = str(student.get("class_id") or "")
+        if cid:
+            student_count_by_class[cid] = student_count_by_class.get(cid, 0) + 1
 
     for class_row in classes:
-        class_id = class_row.get("id") or class_row.get("class_id")
-        class_name = class_row.get("subject") or class_row.get("name") or class_row.get("class_name") or "Class"
-        class_time = class_row.get("time") or ""
-        class_students = class_row.get("students") or ""
+        class_id = _class_id(class_row)
         display_title = _class_title(class_row)
+        assigned_subject_rows = _assignment_subjects_for_class(assignments, class_id)
+        missing_subject = _assignments_missing_subject_for_class(assignments, class_id)
+        students_count = student_count_by_class.get(class_id, 0)
 
         c1, c2 = st.columns([3, 1])
         c1.markdown(
-            f"**{class_name}** — {class_row.get('class_name') or display_title} &nbsp; 🕐 {class_time} &nbsp; 👥 {class_students}"
+            f"""
+            <div style="background:#fff;border-radius:12px;padding:14px;border:1px solid #E5E7EB;">
+              <div style="font-weight:800;font-size:1.02rem;">{html.escape(display_title)}</div>
+              <div style="color:#6B7280;margin-top:6px;font-size:.9rem;">
+                <div>Students: {students_count}</div>
+                <div>Subjects: {len(assigned_subject_rows)}</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
+
+        first_subject_id = _subject_id(assigned_subject_rows[0]) if assigned_subject_rows else ""
         if c2.button("Take Attendance", key=f"cls_{class_id}", type="primary"):
+            st.session_state["selected_teacher_class_id"] = class_id
+            if first_subject_id:
+                st.session_state["selected_teacher_subject_id"] = first_subject_id
+            else:
+                st.session_state.pop("selected_teacher_subject_id", None)
             nav_teacher("manual_att")
+            st.rerun()
 
-        subjects = _load_subjects_for_class(supabase, class_id) if supabase and class_id else []
-
-        with st.expander(f"📚 Subjects for {display_title}", expanded=False):
-            st.markdown("#### Existing Subjects")
-
-            if subjects:
-                for subject in subjects:
-                    subject_id = subject.get("id")
-                    subject_name = subject.get("name") or subject.get("subject_name") or "Unnamed Subject"
-                    subject_code = subject.get("code") or ""
-
-                    with st.form(f"edit_subject_{subject_id}"):
-                        new_name = st.text_input(
-                            "Subject Name",
-                            value=subject_name,
-                            key=f"subject_name_{subject_id}"
-                        )
-
-                        new_code = st.text_input(
-                            "Subject Code",
-                            value=subject_code,
-                            key=f"subject_code_{subject_id}"
-                        )
-
-                        update_clicked = st.form_submit_button("Update Subject")
-
-                        if update_clicked:
-                            if not new_name.strip():
-                                st.error("Subject name is required.")
-                            else:
-                                ok, err = _update_subject(
-                                    supabase,
-                                    subject_id,
-                                    new_name,
-                                    new_code
-                                )
-
-                                if ok:
-                                    st.success("Subject updated successfully.")
-                                    st.rerun()
-                                else:
-                                    st.error(f"Subject update failed: {err}")
+        if not assigned_subject_rows:
+            if missing_subject:
+                st.info("Teacher is assigned to this class but no subject is linked. Please assign a subject.")
             else:
-                st.info("No subjects added yet.")
+                st.info("No subjects assigned to this class yet.")
+            st.divider()
+            continue
 
-            st.markdown("#### Add New Subject")
+        for subj in assigned_subject_rows:
+            s_name = subj.get("subject_name") or subj.get("name") or "Unnamed Subject"
+            s_code = subj.get("subject_code") or subj.get("code") or ""
+            subj_id = _subject_id(subj)
 
-            with st.form(f"add_subject_{class_id}"):
-                subject_name = st.text_input(
-                    "New Subject Name",
-                    placeholder="Example: Mathematics",
-                    key=f"new_subject_name_{class_id}"
-                )
+            sc1, sc2 = st.columns([3, 1])
+            sc1.markdown(
+                f"""
+                <div style="padding:12px;border-radius:12px;border:1px solid #E5E7EB;background:#FAFAFB;">
+                  <div style="font-weight:700;">Subject: {html.escape(str(s_name))}</div>
+                  <div style="color:#6B7280;margin-top:4px;font-size:.92rem;">Subject Code: {html.escape(str(s_code))}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-                subject_code = st.text_input(
-                    "Subject Code",
-                    placeholder="Example: MATH-101",
-                    key=f"new_subject_code_{class_id}"
-                )
-
-                add_clicked = st.form_submit_button("Add Subject")
-
-                if add_clicked:
-                    if not subject_name.strip():
-                        st.error("Subject name is required.")
+            if sc2.button("Share Subject", key=f"share_{class_id}_{subj_id}"):
+                try:
+                    data = generate_subject_join_code(
+                        supabase,
+                        subj_id,
+                        teacher_id=teacher_id,
+                        base_url="http://localhost:8507",
+                    )
+                    if not data:
+                        st.error("Could not create join code. Check subject_join_codes schema/RLS.")
                     else:
-                        ok, err = _add_subject(
-                            supabase,
-                            class_id,
-                            subject_name,
-                            subject_code
-                        )
+                        join_code = data.get("join_code")
+                        join_url = data.get("join_url")
+                        st.subheader("Share Subject")
+                        st.write({"Join Code": join_code})
+                        st.write({"Join Link": join_url})
+                        st.text_input("Join Code", value=str(join_code or ""), key=f"join_code_out_{subj_id}", disabled=True)
+                        st.text_input("Join Link", value=str(join_url or ""), key=f"join_url_out_{subj_id}", disabled=True)
+                except Exception as exc:
+                    st.error("Could not create join code. Check subject_join_codes schema/RLS.")
+                    _show_debug("Developer Debug", str(exc))
 
-                        if ok:
-                            st.success("Subject added successfully.")
-                            st.rerun()
-                        else:
-                            st.error(f"Subject save failed: {err}")
-
-        # --- Create New Subject + Share Subject (join codes + QR) ---
-        st.divider()
-        st.markdown("### ➕ Create New Subject")
-
-        # Resolve teacher identity
-        teacher_id = _get_current_teacher_id()
-        teacher_email = st.session_state.get("user_email") or st.session_state.get("teacher_email")
-
-        if not teacher_id and teacher_email:
-            st.caption(f"[debug] teacher_id missing; will try fallback via email={teacher_email!r}")
-
-        with st.form(f"create_subject_form_{class_id}"):
-            subject_code = st.text_input(
-                "Subject Code (optional)",
-                placeholder="e.g., CS101 or random",
-                key=f"cs_code_{class_id}",
-            )
-            subject_name = st.text_input(
-                "Subject Name",
-                placeholder="e.g., Mathematics",
-                key=f"cs_name_{class_id}",
-            )
-            class_text = st.text_input(
-                "Class",
-                value=str(class_row.get("class_name") or class_row.get("name") or ""),
-                key=f"cs_class_{class_id}",
-            )
-            section = st.text_input(
-                "Section",
-                value=str(class_row.get("section") or ""),
-                key=f"cs_section_{class_id}",
-            )
-
-            submitted = st.form_submit_button("Create Subject")
-
-            if submitted:
-                if not teacher_id and not teacher_email:
-                    st.error("Teacher identity missing. Please login again.")
-                elif not subject_name.strip():
-                    st.error("Subject name is required.")
-                else:
-                    # Map requested Class/Section to the existing schema fields.
-                    # This app already uses `subjects` fields: class_id, teacher_id, institute_id, name, code.
-                    # We'll reuse the currently expanded class_id for saving.
-                    payload = {
-                        "class_id": class_id,
-                        "teacher_id": teacher_id,
-                        "institute_id": _get_current_institute_id(),
-                        "name": _safe_text(subject_name),
-                        "code": _safe_text(subject_code),
-                    }
-
-                    from src.services.subject_service import create_subject
-
-                    try:
-                        if supabase is None:
-                            st.error("Supabase is not connected.")
-                        else:
-                            res = create_subject(supabase, payload)
-                            st.success("✅ Subject created.")
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"Subject create failed: {e}")
-
-        st.markdown("### 📣 Share Subject")
-
-        if supabase is None:
-            st.warning("Supabase is not connected. Join codes will not work.")
-        else:
-            from src.services.subject_service import (
-                generate_subject_join_code,
-                get_teacher_subjects,
-                make_qr_image,
-            )
-
-            teacher_subjects = get_teacher_subjects(
-                supabase,
-                teacher_id=teacher_id,
-                teacher_email=teacher_email,
-            )
-
-            if not teacher_subjects:
-                st.info("No subjects found for your teacher account yet.")
-            else:
-                subj_opts = teacher_subjects
-                selected_subject_id = st.selectbox(
-                    "Select a subject to share",
-                    subj_opts,
-                    format_func=lambda s: s.get("name") or s.get("subject_name") or "Unnamed Subject",
-                    key=f"share_subject_select_{class_id}",
-                )
-                selected_id_val = selected_subject_id.get("id")
-
-                if st.button("Generate Join Code", key=f"gen_join_{class_id}"):
-                    try:
-                        base_url = st.session_state.get(
-                            "base_url", "http://localhost:8507"
-                        )
-                        data = generate_subject_join_code(
-                            supabase,
-                            selected_id_val,
-                            teacher_id=teacher_id,
-                            base_url=base_url,
-                        )
-
-                        if not data:
-                            st.error("Failed to generate join code.")
-                        else:
-                            join_code = data.get("join_code")
-                            join_url = data.get("join_url")
-                            st.success("✅ Join code generated.")
-
-                            st.text_input(
-                                "Join Code",
-                                value=str(join_code or ""),
-                                key=f"join_code_out_{class_id}",
-                                disabled=True,
-                            )
-                            st.text_input(
-                                "Join Link",
-                                value=str(join_url or ""),
-                                key=f"join_url_out_{class_id}",
-                                disabled=True,
-                            )
-
-                            copy_text = join_url or join_code or ""
-                            st.code(copy_text, language="text")
-
-                            qr_buf = make_qr_image(copy_text)
-                            st.image(qr_buf, caption="Scan to enroll", use_container_width=False)
-
-                    except Exception as e:
-                        st.error(f"Join code generation failed: {e}")
+            if sc2.button("Edit Subject", key=f"edit_{class_id}_{subj_id}"):
+                st.info("Edit Subject is available under the existing Subjects section.")
 
         st.divider()
-
 
 
 def _students():
     import pandas as pd
-    import streamlit as st
-
-    from src.database.client import get_supabase_client
 
     st.markdown("## 👥 Students")
 
-    supabase = get_supabase_client()
+    from src.database.client import get_supabase_client
+    from src.services.teacher_service import get_teacher_assignments, resolve_teacher_identity
 
+    supabase = get_supabase_client()
     if not supabase:
         st.error("Supabase is not connected.")
         return
 
-    # Search box
-    search = st.text_input("🔍 Search", placeholder="Name or roll...", key="teacher_students_search")
-
-    # Add Student section
-    with st.expander("➕ Add Student", expanded=False):
-        with st.form("add_student_form"):
-            name = st.text_input("Student Name *", key="new_student_name")
-            roll_no = st.text_input("Roll No *", key="new_student_roll")
-            class_name = st.text_input("Class", placeholder="Example: 12-A", key="new_student_class")
-            section = st.text_input("Section", placeholder="Example: A", key="new_student_section")
-
-            submitted = st.form_submit_button("Add Student")
-
-            if submitted:
-                if not name.strip() or not roll_no.strip():
-                    st.error("Student name and roll number are required.")
-                else:
-                    payload = {
-                        "name": name.strip(),
-                        "roll_no": roll_no.strip(),
-                        "class_name": class_name.strip() if class_name else None,
-                        "section": section.strip() if section else None,
-                    }
-
-                    try:
-                        supabase.table("students").insert(payload).execute()
-                        st.success("Student added successfully.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Student save failed: {e}")
-
-    # Load students
-    try:
-        res = (
-            supabase
-            .table("students")
-            .select("*")
-            .order("name")
-            .execute()
-        )
-
-        students = res.data or []
-
-    except Exception as e:
-        st.error(f"Could not load students from Supabase: {e}")
+    # Resolve teacher_id from logged-in teacher email.
+    teacher = resolve_teacher_identity(supabase, show_error=False)
+    teacher_id = (teacher or {}).get("id")
+    if not teacher_id:
+        st.warning("Please login first.")
         return
 
+    # Search box
+    search = st.text_input(
+        "🔍 Search",
+        placeholder="Name or roll...",
+        key="teacher_students_search",
+    )
+
+    # Fetch active teacher assignments -> class_ids
+    assignments = get_teacher_assignments(supabase, teacher_id)
+    class_ids = sorted({str(a.get("class_id")) for a in (assignments or []) if a.get("class_id")})
+
+    if not class_ids:
+        st.info("No students found in your assigned classes.")
+        return
+
+    # Fetch students where class_id in assigned class_ids
+    try:
+        res = (
+            supabase.table("students")
+            .select("id, roll_no, roll, name, email, class_id, class_name, section, status")
+            .in_("class_id", class_ids)
+            .execute()
+        )
+        students = res.data or []
+    except Exception:
+        # Best-effort fallback for older schema where class_id/class_name differ.
+        students = []
+        try:
+            res = (
+                supabase.table("students")
+                .select("id, roll_no, roll, name, email, class_id, class_name, section, status")
+                .execute()
+            )
+            all_students = res.data or []
+            # Keep those whose class_name is among assignment classes.
+            assigned_class_names = set(
+                str(a.get("classes", {}).get("class_name") or a.get("classes", {}).get("name") or "")
+                for a in (assignments or [])
+            )
+            students = [s for s in all_students if str(s.get("class_id") or "") in set(class_ids) or str(s.get("class_name") or "") in assigned_class_names]
+        except Exception:
+            students = []
+
     if not students:
-        st.info("No students found in Supabase.")
+        st.info("No students found in your assigned classes.")
         return
 
     # Normalize rows for display
     rows = []
-
     for s in students:
-        rows.append({
-            "Roll No": s.get("roll_no") or s.get("roll") or "",
-            "Name": s.get("name") or "",
-            "Class": s.get("class_name") or s.get("class") or "",
-            "Section": s.get("section") or "",
-        })
+        rows.append(
+            {
+                "Name": s.get("name") or s.get("full_name") or "",
+                "Roll No": s.get("roll_no") or s.get("roll") or "",
+                "Email": s.get("email") or "",
+                "Class": s.get("class_name") or "",
+                "Section": s.get("section") or "",
+                "Status": (s.get("status") or "active"),
+            }
+        )
 
     df = pd.DataFrame(rows)
 
-    # Apply search
     if search:
         search_lower = search.lower()
         df = df[
             df["Name"].astype(str).str.lower().str.contains(search_lower, na=False)
             | df["Roll No"].astype(str).str.lower().str.contains(search_lower, na=False)
+            | df["Email"].astype(str).str.lower().str.contains(search_lower, na=False)
             | df["Class"].astype(str).str.lower().str.contains(search_lower, na=False)
         ]
 
@@ -1023,6 +977,7 @@ def _students():
         return
 
     st.dataframe(df, use_container_width=True, hide_index=True)
+
 
 
 

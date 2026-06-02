@@ -77,6 +77,10 @@ def _ensure_code_columns(payload: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 
+def _norm_text(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
 def list_institutes() -> List[Dict[str, Any]]:
     """Return all institutes from Supabase or session_state."""
     db = _db()
@@ -131,7 +135,7 @@ def create_institute(
             "address": address.strip(),
             "institute_type": institute_type,
             "admin_name": admin_name.strip(),
-            "admin_email": admin_email.strip(),
+            "admin_email": admin_email.strip().lower(),
             "admin_phone": admin_phone.strip(),
             "plan": plan,
             "status": status,
@@ -144,10 +148,67 @@ def create_institute(
     db = _db()
     if db is None:
         init_institute_state()
+        for index, existing in enumerate(st.session_state.institutes):
+            same_admin = payload.get("admin_email") and _norm_text(existing.get("admin_email")) == _norm_text(payload.get("admin_email"))
+            same_identity = (
+                bool(payload.get("admin_email"))
+                and
+                _norm_text(existing.get("name")) == _norm_text(payload.get("name"))
+                and _norm_text(existing.get("city")) == _norm_text(payload.get("city"))
+                and _norm_text(existing.get("admin_email")) == _norm_text(payload.get("admin_email"))
+            )
+            if same_admin or same_identity:
+                merged = {**existing, **{k: v for k, v in payload.items() if v not in (None, "")}}
+                st.session_state.institutes[index] = merged
+                return {
+                    "ok": True,
+                    "demo": True,
+                    "data": merged,
+                    "reused": True,
+                    "message": f"Institute '{name}' already exists locally. Reused existing row.",
+                }
         st.session_state.institutes.append(payload)
         return {"ok": True, "demo": True, "data": payload, "message": f"Institute '{name}' created locally."}
 
     try:
+        existing_rows: list[dict[str, Any]] = []
+        if payload.get("admin_email"):
+            existing_rows = (
+                db.table("institutes")
+                .select("*")
+                .eq("admin_email", payload.get("admin_email"))
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+        if not existing_rows and payload.get("name") and payload.get("city") and payload.get("admin_email"):
+            existing_rows = (
+                db.table("institutes")
+                .select("*")
+                .eq("name", payload.get("name"))
+                .eq("city", payload.get("city"))
+                .eq("admin_email", payload.get("admin_email"))
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+        if existing_rows:
+            existing = existing_rows[0]
+            clean_updates = {key: value for key, value in payload.items() if value not in (None, "") and key != "id"}
+            rows = db.table("institutes").update(clean_updates).eq("id", existing["id"]).execute().data or []
+            record = rows[0] if rows else {**existing, **clean_updates}
+            return {
+                "ok": True,
+                "demo": False,
+                "data": record,
+                "reused": True,
+                "message": f"Institute '{name}' already exists. Reused existing row.",
+            }
+
         db.table("institutes").insert(payload).execute()
         response = (
             db.table("institutes")

@@ -1,127 +1,331 @@
 """Classes & Subjects management for institute admin."""
-import streamlit as st, uuid, pandas as pd
+from __future__ import annotations
+
+import uuid
+from typing import Any
+
+import pandas as pd
+import streamlit as st
+
+from src.components.form_controls import format_class_option, safe_selectbox
+from src.services.admin_class_subject_service import (
+    add_class,
+    add_subject,
+    list_classes,
+    list_students,
+    list_subjects,
+    list_teachers,
+)
+from src.services.admin_context import get_current_institute_id
+from src.services.institute_service import _db, init_institute_state
 
 
-from src.services.institute_service import init_institute_state, _db
+def _text(value: Any) -> str:
+    return str(value or "").strip()
 
 
+def _fallback_rows(key: str, inst_id: str) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in st.session_state.get(key, [])
+        if _text(row.get("institute_id")) == _text(inst_id)
+    ]
 
 
+def _load_classes(inst_id: str) -> list[dict[str, Any]]:
+    if _db() and inst_id:
+        return list_classes(inst_id)
+    return _fallback_rows("classes", inst_id)
 
-def show_classes_subjects():
+
+def _load_subjects(inst_id: str) -> list[dict[str, Any]]:
+    if _db() and inst_id:
+        return list_subjects(inst_id)
+    return _fallback_rows("subjects", inst_id)
+
+
+def _load_students(inst_id: str) -> list[dict[str, Any]]:
+    if _db() and inst_id:
+        return list_students(inst_id)
+    return _fallback_rows("students", inst_id)
+
+
+def _load_teachers(inst_id: str) -> list[dict[str, Any]]:
+    if _db() and inst_id:
+        return list_teachers(inst_id)
+    return _fallback_rows("teachers", inst_id)
+
+
+def _teacher_label(teacher: dict[str, Any] | None) -> str:
+    if not teacher:
+        return "No teacher"
+    name = _text(teacher.get("name")) or "Unnamed Teacher"
+    email = _text(teacher.get("email"))
+    return f"{name} - {email}" if email else name
+
+
+def _setup_progress(classes: list[dict[str, Any]], subjects: list[dict[str, Any]], students: list[dict[str, Any]], teachers: list[dict[str, Any]]) -> None:
+    st.subheader("Setup Progress")
+    assignment_done = any(st.session_state.get("teacher_assignments", []))
+    items = [
+        ("Class created", bool(classes)),
+        ("Subject added", bool(subjects)),
+        ("Teacher added", bool(teachers)),
+        ("Teacher assigned", assignment_done),
+        ("Student added", bool(students)),
+    ]
+    cols = st.columns(len(items))
+    for col, (label, done) in zip(cols, items):
+        col.metric(label, "Done" if done else "Pending")
+
+
+def _class_counts(classes: list[dict[str, Any]], subjects: list[dict[str, Any]], students: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    counts = {str(row.get("id")): {"subjects": 0, "students": 0} for row in classes}
+    for subject in subjects:
+        class_id = str(subject.get("class_id") or "")
+        if class_id in counts:
+            counts[class_id]["subjects"] += 1
+    for student in students:
+        class_id = str(student.get("class_id") or "")
+        if class_id in counts:
+            counts[class_id]["students"] += 1
+    return counts
+
+
+def _render_add_class(inst_id: str) -> None:
+    st.subheader("Add Class")
+    with st.form("add_class_form", clear_on_submit=True):
+        c1, c2, c3 = st.columns(3)
+        cls_name = c1.text_input("Class Name *", placeholder="12")
+        section = c2.text_input("Section *", placeholder="A")
+        acad_yr = c3.text_input("Academic Year *", placeholder="2026-27")
+        submitted = st.form_submit_button("Add Class", type="primary", use_container_width=True)
+
+    if not submitted:
+        return
+
+    if _db() and inst_id:
+        result = add_class(
+            institute_id=inst_id,
+            class_name=cls_name,
+            section=section,
+            academic_year=acad_yr,
+        )
+        if result.get("ok"):
+            row = result.get("class") or {}
+            st.success(
+                f"Class {row.get('class_name', cls_name)}-{row.get('section', section)} created successfully. Next step: Add subjects for this class."
+            )
+            st.rerun()
+        else:
+            st.error(result.get("message") or "Class could not be saved.")
+            if result.get("debug"):
+                with st.expander("Developer Debug", expanded=False):
+                    st.code(str(result.get("debug")))
+        return
+
+    class_name = _text(cls_name)
+    section_value = _text(section).upper()
+    academic_year = _text(acad_yr)
+    if not class_name or not section_value or not academic_year:
+        st.error("Class name, section, and academic year are required.")
+        return
+
+    duplicate = any(
+        _text(row.get("class_name")).lower() == class_name.lower()
+        and _text(row.get("section")).lower() == section_value.lower()
+        and _text(row.get("academic_year")).lower() == academic_year.lower()
+        for row in _fallback_rows("classes", inst_id)
+    )
+    if duplicate:
+        st.error(f"Class {class_name}-{section_value} already exists for {academic_year}.")
+        return
+
+    record = {
+        "id": str(uuid.uuid4()),
+        "institute_id": inst_id,
+        "class_name": class_name,
+        "section": section_value,
+        "academic_year": academic_year,
+        "status": "active",
+    }
+    st.session_state.classes.append(record)
+    st.success(f"Class {class_name}-{section_value} created successfully. Next step: Add subjects for this class.")
+
+
+def _render_classes_list(classes: list[dict[str, Any]], subjects: list[dict[str, Any]], students: list[dict[str, Any]]) -> None:
+    st.subheader("Classes List")
+    if not classes:
+        st.info("No classes added yet. Create your first class before adding students and subjects.")
+        return
+
+    counts = _class_counts(classes, subjects, students)
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "Class": row.get("class_name", ""),
+                    "Section": row.get("section", ""),
+                    "Academic Year": row.get("academic_year", ""),
+                    "Subjects": counts.get(str(row.get("id")), {}).get("subjects", 0),
+                    "Students": counts.get(str(row.get("id")), {}).get("students", 0),
+                    "Status": row.get("status", "active"),
+                    "Actions": "Add Subject / View Students",
+                }
+                for row in classes
+            ]
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def _render_add_subject(inst_id: str, classes: list[dict[str, Any]], teachers: list[dict[str, Any]]) -> None:
+    st.subheader("Add Subject")
+    if not classes:
+        st.info("Please add a class first before adding subjects.")
+        return
+
+    with st.form("add_subject_form", clear_on_submit=True):
+        selected_class = safe_selectbox(
+            "Class *",
+            classes,
+            key="subject_class_select",
+            format_func=format_class_option,
+            index=None,
+            placeholder="Choose class",
+            show_selected=False,
+        )
+        if selected_class:
+            st.success(f"Selected Class: {format_class_option(selected_class)}")
+        else:
+            st.info("Select a class before adding a subject.")
+
+        c1, c2 = st.columns(2)
+        s_name = c1.text_input("Subject Name *", placeholder="Physics")
+        s_code = c2.text_input("Subject Code", placeholder="PHY12")
+
+        teacher_options: list[dict[str, Any] | None] = [None] + teachers if teachers else [None]
+        selected_teacher = st.selectbox(
+            "Teacher",
+            teacher_options,
+            format_func=_teacher_label,
+            key="subject_teacher_select",
+        )
+        submitted = st.form_submit_button("Add Subject", type="primary", use_container_width=True)
+
+    if not submitted:
+        return
+
+    teacher_id = _text((selected_teacher or {}).get("id")) if isinstance(selected_teacher, dict) else ""
+    if _db() and inst_id:
+        result = add_subject(
+            institute_id=inst_id,
+            class_record=selected_class,
+            subject_name=s_name,
+            subject_code=s_code,
+            teacher_id=teacher_id,
+        )
+        if result.get("ok"):
+            subject = result.get("subject") or {}
+            st.success(f"{subject.get('subject_name', s_name)} added successfully.")
+            st.rerun()
+        else:
+            st.error(result.get("message") or "Subject could not be saved.")
+            if result.get("debug"):
+                with st.expander("Developer Debug", expanded=False):
+                    st.code(str(result.get("debug")))
+        return
+
+    if not selected_class:
+        st.error("Select a class.")
+        return
+    subject_name = _text(s_name)
+    subject_code = _text(s_code).upper()
+    if not subject_name:
+        st.error("Subject name required.")
+        return
+
+    duplicate = any(
+        _text(row.get("class_id")) == _text(selected_class.get("id"))
+        and (
+            (subject_code and _text(row.get("subject_code")).lower() == subject_code.lower())
+            or _text(row.get("subject_name") or row.get("name")).lower() == subject_name.lower()
+        )
+        for row in _fallback_rows("subjects", inst_id)
+    )
+    if duplicate:
+        st.error("This subject already exists for the selected class.")
+        return
+
+    record = {
+        "id": str(uuid.uuid4()),
+        "institute_id": inst_id,
+        "class_id": selected_class.get("id"),
+        "teacher_id": teacher_id or None,
+        "name": subject_name,
+        "subject_name": subject_name,
+        "subject_code": subject_code,
+        "class_name": selected_class.get("class_name") or selected_class.get("name"),
+        "section": selected_class.get("section"),
+        "status": "active",
+    }
+    st.session_state.subjects.append(record)
+    st.success(f"{subject_name} added successfully.")
+
+
+def _render_subjects_list(subjects: list[dict[str, Any]], classes: list[dict[str, Any]], teachers: list[dict[str, Any]]) -> None:
+    st.subheader("Subjects List")
+    if not subjects:
+        st.info("No subjects added yet.")
+        return
+
+    class_by_id = {str(row.get("id")): row for row in classes}
+    teacher_by_id = {str(row.get("id")): row for row in teachers}
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "Subject Name": row.get("subject_name") or row.get("name", ""),
+                    "Subject Code": row.get("subject_code", ""),
+                    "Class": (class_by_id.get(str(row.get("class_id"))) or row).get("class_name", ""),
+                    "Section": (class_by_id.get(str(row.get("class_id"))) or row).get("section", ""),
+                    "Teacher": _teacher_label(teacher_by_id.get(str(row.get("teacher_id")))) if row.get("teacher_id") else "-",
+                    "Status": row.get("status", "active"),
+                }
+                for row in subjects
+            ]
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def show_classes_subjects() -> None:
     init_institute_state()
-    inst_id = st.session_state.get("active_institute_id","")
-    st.markdown("### 📚 Classes & Subjects")
+    inst_id = get_current_institute_id()
+    st.markdown("### Classes & Subjects")
 
-    tab_cls, tab_sub = st.tabs(["🏫 Classes","📖 Subjects"])
+    if not inst_id:
+        st.warning("Please log in again with your institute admin account.")
+        return
 
-    def get_classes():
-        db = _db()
-        if db and inst_id:
-            try: return db.table("classes").select("*").eq("institute_id",inst_id).execute().data or []
-            except Exception: pass
-        return [c for c in st.session_state.get("classes",[]) if c.get("institute_id")==inst_id]
+    classes = _load_classes(inst_id)
+    subjects = _load_subjects(inst_id)
+    students = _load_students(inst_id)
+    teachers = _load_teachers(inst_id)
+    _setup_progress(classes, subjects, students, teachers)
 
-    def get_subjects():
-        db = _db()
-        if db and inst_id:
-            try: return db.table("subjects").select("*").eq("institute_id",inst_id).execute().data or []
-            except Exception: pass
-        return [s for s in st.session_state.get("subjects",[]) if s.get("institute_id")==inst_id]
+    tab_cls, tab_sub = st.tabs(["Classes", "Subjects"])
 
     with tab_cls:
-        with st.expander("➕ Add Class", expanded=False):
-            with st.form("add_class_form"):
-                c1,c2,c3 = st.columns(3)
-                cls_name = c1.text_input("Class Name *", placeholder="Grade 10")
-                section  = c2.text_input("Section",      placeholder="A")
-                acad_yr  = c3.text_input("Academic Year",placeholder="2025-26")
-                if st.form_submit_button("Add Class", type="primary"):
-                    if not cls_name:
-                        st.error("Class name required.")
-                    else:
-                        record = {"id":str(uuid.uuid4()),"institute_id":inst_id,
-                                  "class_name":cls_name,"section":section,"academic_year":acad_yr}
-                        db = _db()
-                        if db and inst_id:
-                            try:
-                                db.table("classes").insert(record).execute()
-                                st.success(f"✅ Class {cls_name} added.")
-                            except Exception as e:
-                                st.exception(e)
-                        else:
-                            st.session_state.classes.append(record)
-                            st.success(f"✅ {cls_name} added (demo mode).")
-                        st.rerun()
-        classes = get_classes()
-        if classes:
-            st.dataframe(pd.DataFrame([{"Class":c.get("class_name",""),"Section":c.get("section",""),
-                          "Academic Year":c.get("academic_year","")} for c in classes]),
-                         use_container_width=True, hide_index=True)
-        else:
-            st.info("No classes yet. Add one above.")
+        _render_add_class(inst_id)
+        st.divider()
+        _render_classes_list(_load_classes(inst_id), _load_subjects(inst_id), _load_students(inst_id))
 
     with tab_sub:
-        classes  = get_classes()
-        cls_map  = {f"{c.get('class_name','')} {c.get('section','')}".strip(): c.get("id","") for c in classes}
-        with st.expander("➕ Add Subject", expanded=False):
-            with st.form("add_subject_form"):
-                c1,c2,c3 = st.columns(3)
-
-                # Required: if no classes exist, show exact empty-state text
-                if not cls_map:
-                    st.info("Please add a class first before adding subjects.")
-                else:
-                    # Required: Class dropdown should show "ClassName - Section" and store class_id internally
-                    class_options = {
-                        f"{c.get('class_name','')} - {c.get('section','')}".strip(): c.get('id')
-                        for c in classes
-                        if c.get('id')
-                    }
-                    selected_class_label = c1.selectbox(
-                        "Class *",
-                        list(class_options.keys()),
-                        index=None,
-                        placeholder="Select class",
-                        key="subject_class_select",
-                    )
-                    selected_class_id = class_options.get(selected_class_label) if selected_class_label else None
-
-                    s_name = c2.text_input("Subject Name *", placeholder="Mathematics")
-                    s_code = c3.text_input("Subject Code", placeholder="MATH-10")
-
-                    if st.form_submit_button("Add Subject", type="primary"):
-                        if not selected_class_id:
-                            st.error("Select a class.")
-                        elif not s_name:
-                            st.error("Subject name required.")
-                        else:
-                            record = {
-                                "id": str(uuid.uuid4()),
-                                "institute_id": inst_id,
-                                "class_id": selected_class_id,
-                                "subject_name": s_name,
-                                "subject_code": s_code,
-                            }
-                            db = _db()
-                            saved_to_supabase = False
-                            if db and inst_id:
-                                try:
-                                    db.table("subjects").insert(record).execute()
-                                    saved_to_supabase = True
-                                    st.success(f"✅ {s_name} added.")
-                                except Exception as e:
-                                    st.exception(e)
-                            else:
-                                st.session_state.subjects.append(record)
-                                st.warning("Subject saved locally (Supabase not connected).")
-
-                            st.rerun()
-        subjects = get_subjects()
-        if subjects:
-            st.dataframe(pd.DataFrame([{"Subject":s.get("subject_name","") ,
-                          "Code":s.get("subject_code","") ,
-                          "Class ID":s.get("class_id","")} for s in subjects]),
-                         use_container_width=True, hide_index=True)
-        else:
-            st.info("No subjects yet.")
+        classes = _load_classes(inst_id)
+        teachers = _load_teachers(inst_id)
+        _render_add_subject(inst_id, classes, teachers)
+        st.divider()
+        _render_subjects_list(_load_subjects(inst_id), classes, teachers)

@@ -8,8 +8,16 @@ def show_institute_setup() -> None:
     init_institute_state()
     institute = st.session_state.get("current_institute")
     if not institute:
-        st.error("No institute active. Log in again.")
-        if st.button("← Back to Login"):
+        st.warning("Your institute session is missing. Please start your demo again or login.")
+        c1, c2, c3 = st.columns(3)
+        if c1.button("Start Demo Again", use_container_width=True):
+            st.session_state.return_to = "pricing"
+            st.session_state.page = "demo_signup"
+            st.rerun()
+        if c2.button("Back to Pricing", use_container_width=True):
+            st.session_state.page = "pricing"
+            st.rerun()
+        if c3.button("Admin Login", use_container_width=True):
             st.session_state.page = "institute_login"
             st.rerun()
         return
@@ -104,11 +112,7 @@ def show_institute_setup() -> None:
                 inst_id = st.session_state.get("active_institute_id", "")
                 result = update_institute(inst_id, updates) if inst_id else {"ok": True, "demo": True, "message": "✅ Saved locally (no institute_id in session — demo mode)."}
                 if not result.get("ok"):
-                    err = result.get("error")
-                    if err:
-                        st.exception(err if isinstance(err, BaseException) else Exception(str(err)))
-                    else:
-                        st.exception(Exception(result.get("message", "Supabase save failed.")))
+                    st.error("Institute setup could not be saved. Please check your access and try again.")
                     return
 
                 institute.update(updates)

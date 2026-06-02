@@ -8,6 +8,11 @@ import streamlit as st
 from src.components.sidebar import student_sidebar
 from src.components.ui import db_status_banner
 from src.utils.session import nav_student, check_route_access
+from src.utils.user_guards import (
+    show_no_attendance_records,
+    show_no_reports,
+    show_no_subjects,
+)
 from src.utils.helpers import attendance_color
 from src.services.demo_data import ATTENDANCE_TREND, NOTIFICATIONS
 
@@ -188,7 +193,7 @@ def _subjects():
         supabase = None
 
     if supabase is None:
-        st.warning("Supabase is not connected. Enrolment will not work.")
+        st.warning("Supabase is not configured. Add .streamlit/secrets.toml.")
     else:
         join_code_input = st.text_input(
             "Enter subject join code",
@@ -228,7 +233,7 @@ def _subjects():
 
         resolved_id = None
         if supabase is not None:
-            resolved_id = resolve_student_identity(supabase)
+            resolved_id = resolve_student_identity(supabase, show_error=False)
 
         if supabase is not None and resolved_id:
             # Subject rows from PRD enrollment
@@ -290,11 +295,11 @@ def _subjects():
 
             subj = pd.DataFrame(rows_out)
 
-    except Exception as e:
-        st.caption(f"[debug] enrolled subjects fetch failed: {e}")
+    except Exception:
+        st.caption("Enrolled subjects could not be loaded.")
 
     if "subj" not in locals() or subj is None or subj.empty:
-        st.info("No subjects found.")
+        show_no_subjects()
         return
 
 
@@ -370,16 +375,15 @@ def _history():
         st.warning("Supabase not connected. Attendance History is unavailable.")
         return
 
-    resolved_id = resolve_student_identity(supabase)
+    resolved_id = resolve_student_identity(supabase, show_error=False)
     if not resolved_id:
-        st.warning("Student identity missing. Login again or ask admin to add your student profile with the same email.")
+        show_no_attendance_records()
         return
 
     rows = get_student_attendance_records(supabase, resolved_id)
 
     if not rows:
-        st.info("No attendance history found yet.")
-        st.caption("Once your teacher marks attendance, records will appear here.")
+        show_no_attendance_records()
         return
 
     df = pd.DataFrame(rows)
@@ -418,6 +422,79 @@ def _history():
 
 def _analytics():
     db_status_banner()
+    st.markdown("### Analytics")
+
+    import pandas as pd
+
+    try:
+        from src.database.client import get_supabase
+        from src.services.attendance_service import get_student_attendance_records
+        from src.services.student_identity import resolve_student_identity
+
+        supabase = get_supabase()
+        resolved_id = resolve_student_identity(supabase, show_error=False) if supabase else None
+        rows = get_student_attendance_records(supabase, resolved_id) if supabase and resolved_id else []
+    except Exception:
+        rows = []
+
+    if not rows:
+        show_no_reports()
+        return
+
+    df = pd.DataFrame(rows)
+    if "status" not in df.columns:
+        show_no_reports()
+        return
+
+    subject_col = "subject_id" if "subject_id" in df.columns else "subject"
+    if subject_col not in df.columns:
+        subject_col = "session_id"
+
+    df["present_value"] = df["status"].astype(str).str.lower().isin(["present", "late"]).astype(int)
+    subj = (
+        df.groupby(subject_col, dropna=False)["present_value"]
+        .agg(["sum", "count"])
+        .reset_index()
+        .rename(columns={subject_col: "subject", "sum": "present", "count": "total"})
+    )
+    subj["attendance"] = (subj["present"] / subj["total"] * 100).round(1)
+    c1, c2 = st.columns(2)
+    with c1:
+        fig = px.bar(
+            subj,
+            x="subject",
+            y="attendance",
+            color="attendance",
+            color_continuous_scale=["#EF4444", "#F59E0B", "#10B981"],
+            title="Subject-wise Attendance %",
+        )
+        fig.add_hline(y=75, line_dash="dash", line_color="#EF4444")
+        fig.update_layout(
+            template="plotly_white",
+            font=dict(color="#111827"),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=0, r=0, t=40, b=0),
+            coloraxis_showscale=False,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    with c2:
+        fig2 = px.pie(
+            subj,
+            names="subject",
+            values="present",
+            title="Attendance Share",
+            color_discrete_sequence=["#5B6CFF", "#FF4FA3", "#10B981", "#F59E0B", "#38BDF8", "#818cf8"],
+        )
+        fig2.update_layout(
+            template="plotly_white",
+            font=dict(color="#111827"),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=0, r=0, t=40, b=0),
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+    return
     st.markdown("### 📊 Analytics")
     subj = _get_subjects()
     if subj.empty: st.info("No data yet."); return
@@ -466,19 +543,18 @@ def _reports():
         supabase = None
 
     if not supabase:
-        st.info("No attendance report found yet.")
+        show_no_reports()
         return
 
-    resolved_id = resolve_student_identity(supabase)
+    resolved_id = resolve_student_identity(supabase, show_error=False)
     if not resolved_id:
-        st.info("No attendance report found yet.")
+        show_no_reports()
         return
 
     rows = get_student_attendance_records(supabase, resolved_id)
 
     if not rows:
-        st.info("No attendance report found yet.")
-        st.caption("Once your teacher marks attendance, reports will be available here.")
+        show_no_reports()
         return
 
     df = pd.DataFrame(rows)

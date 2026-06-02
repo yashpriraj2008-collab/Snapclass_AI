@@ -2,6 +2,7 @@
 import streamlit as st
 
 
+from src.services.admin_context import get_current_institute_id
 from src.services.institute_service import init_institute_state, _db
 
 
@@ -13,7 +14,7 @@ def show_institute_dashboard():
     init_institute_state()
     db_status_banner()
     inst     = st.session_state.get("current_institute") or {}
-    inst_id  = st.session_state.get("active_institute_id","")
+    inst_id  = get_current_institute_id()
     admin_n  = st.session_state.get("admin_name", st.session_state.get("user_name","Admin"))
     inst_nm  = inst.get("name", st.session_state.get("active_institute_name","My Institute"))
 
@@ -32,6 +33,8 @@ def show_institute_dashboard():
     n_students = _count("students")
     n_classes  = _count("classes")
     n_subjects = _count("subjects")
+    n_assignments = _count("teacher_assignments")
+    n_attendance = _count("attendance_sessions")
 
     c1,c2,c3,c4 = st.columns(4,gap="medium")
     for col,label,val,color,icon in [
@@ -61,6 +64,26 @@ def show_institute_dashboard():
         st.markdown("""<div class="sc-alert info">ℹ️ <strong>Getting Started:</strong>
           Add Classes first → then Teachers → then Students.
           Use Quick Actions above or sidebar navigation.</div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("#### Setup Progress")
+    checklist = [
+        ("Create Class", n_classes > 0),
+        ("Add Teacher", n_teachers > 0),
+        ("Add Students", n_students > 0),
+        ("Create Subject", n_subjects > 0),
+        ("Assign Teacher", n_assignments > 0),
+        ("Start Attendance", n_attendance > 0),
+    ]
+    cols = st.columns(3, gap="medium")
+    for idx, (label, done) in enumerate(checklist):
+        with cols[idx % 3]:
+            status = "Done" if done else "Pending"
+            tone = "ok" if done else "info"
+            st.markdown(
+                f'<div class="sc-alert {tone}"><strong>{status}</strong><br>{label}</div>',
+                unsafe_allow_html=True,
+            )
 
     # Institute info card
     st.markdown("<br>",unsafe_allow_html=True)

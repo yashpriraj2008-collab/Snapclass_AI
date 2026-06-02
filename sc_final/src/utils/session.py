@@ -1,5 +1,6 @@
 """Session state management for all roles."""
 import streamlit as st
+from src.utils.user_guards import require_login
 
 def init_session():
     defaults = {
@@ -69,6 +70,8 @@ def nav_founder(page: str):
 
 def check_route_access():
     if not st.session_state.get("role"):
+        require_login()
+        st.stop()
         st.error("🔒 Please log in first.")
         if st.button("← Home", key="route_home"):
             go("landing")

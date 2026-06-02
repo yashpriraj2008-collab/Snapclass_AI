@@ -11,7 +11,8 @@ from typing import Any, Optional
 
 import streamlit as st
 
-_EMAIL_KEYS = ["student_email", "user_email", "email"]
+_AUTH_USER_ID_KEYS = ["auth_user_id", "user_id"]
+_EMAIL_KEYS = ["student_email", "user_email", "auth_user_email", "email"]
 _ROLL_KEYS = ["roll_no", "user_roll", "user_roll_no", "roll"]
 _NAME_KEYS = ["student_name", "user_name", "name", "full_name"]
 
@@ -39,6 +40,26 @@ def _session_user_email() -> Optional[str]:
         value = getattr(user, "email", None)
         if value:
             return str(value).strip().lower()
+
+    return None
+
+
+def _session_auth_user_id() -> Optional[str]:
+    direct = _first_session_value(_AUTH_USER_ID_KEYS)
+    if direct:
+        return direct
+
+    user = st.session_state.get("user") or st.session_state.get("auth_user") or {}
+    if isinstance(user, dict):
+        for key in ["id", "user_id", "auth_user_id"]:
+            value = user.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+    else:
+        for key in ["id", "user_id"]:
+            value = getattr(user, key, None)
+            if value:
+                return str(value).strip()
 
     return None
 
@@ -84,6 +105,14 @@ def _store_student(row: dict[str, Any]) -> str:
         st.session_state["student_email"] = str(row.get("email")).lower()
         st.session_state.setdefault("user_email", str(row.get("email")).lower())
 
+    if row.get("user_id"):
+        st.session_state.setdefault("auth_user_id", str(row.get("user_id")))
+        st.session_state.setdefault("user_id", str(row.get("user_id")))
+
+    if row.get("institute_id"):
+        st.session_state["institute_id"] = str(row.get("institute_id"))
+        st.session_state.setdefault("active_institute_id", str(row.get("institute_id")))
+
     if row.get("roll_no"):
         st.session_state["roll_no"] = str(row.get("roll_no"))
         st.session_state.setdefault("user_roll", str(row.get("roll_no")))
@@ -113,13 +142,16 @@ def resolve_student_identity(supabase, show_error: bool = True) -> Optional[str]
             st.error("Supabase is not connected. Student identity cannot be resolved.")
         return None
 
+    auth_user_id = _session_auth_user_id()
     email = _session_user_email()
     roll_no = _first_session_value(_ROLL_KEYS)
     name = _first_session_value(_NAME_KEYS)
 
     try:
         # Fresh query each time. Do not reuse Supabase query builder.
-        row = _find_one(supabase, "email", email) if email else None
+        row = _find_one(supabase, "user_id", auth_user_id) if auth_user_id else None
+        if not row and email:
+            row = _find_one(supabase, "email", email)
         if not row and roll_no:
             row = _find_one(supabase, "roll_no", roll_no)
         if not row and name:

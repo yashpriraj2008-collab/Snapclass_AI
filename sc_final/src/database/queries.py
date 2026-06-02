@@ -287,22 +287,29 @@ def get_attendance_for_student(roll_no: str) -> pd.DataFrame:
         sid = get_student_id(roll_no)
         if not sid:
             return pd.DataFrame()
-        data = (db.table("attendance")
-                  .select("attendance_date,status,subjects(name)")
-                  .eq("student_id", sid)
-                  .order("attendance_date", desc=True)
-                  .limit(60)
-                  .execute().data)
+        data = (
+            db.table("attendance")
+            .select("attendance_date,created_at,status,subjects(name)")
+            .eq("student_id", sid)
+            .order("attendance_date", desc=True)
+            .limit(60)
+            .execute().data
+        )
         if not data:
             return pd.DataFrame()
         rows = []
         for r in data:
             subj = r.get("subjects") or {}
-            rows.append({
-                "Date":    r["attendance_date"],
-                "Subject": subj.get("name", "—"),
-                "Status":  r["status"].capitalize(),
-            })
+            attendance_date = r.get("attendance_date")
+            if not attendance_date and r.get("created_at"):
+                attendance_date = str(r.get("created_at"))[:10]
+            rows.append(
+                {
+                    "Date": attendance_date,
+                    "Subject": subj.get("name", "—"),
+                    "Status": str(r.get("status", "")).capitalize(),
+                }
+            )
         return pd.DataFrame(rows)
     except Exception:
         return pd.DataFrame()
@@ -318,16 +325,30 @@ def get_attendance_for_class(class_name: Optional[str], subject_name: str, att_d
         sid = get_subject_id(subject_name, class_name)
         if not sid:
             return pd.DataFrame()
-        data = (db.table("attendance")
-                  .select("student_id,status,students(roll_no,name)")
-                  .eq("subject_id", sid)
-                  .eq("attendance_date", att_date)
-                  .execute().data)
+        data = (
+            db.table("attendance")
+            .select("student_id,status,attendance_date,created_at,students(roll_no,name)")
+            .eq("subject_id", sid)
+            .execute().data
+        )
         if not data:
             return pd.DataFrame()
-        rows = [{"roll":  r["students"]["roll_no"],
-                 "name":  r["students"]["name"],
-                 "status":r["status"]} for r in data if r.get("students")]
+        rows = []
+        for r in data:
+            row_date = r.get("attendance_date") or (str(r.get("created_at"))[:10] if r.get("created_at") else None)
+            if att_date and row_date and str(row_date) != str(att_date):
+                continue
+            students = r.get("students") or {}
+            if not students:
+                continue
+            rows.append(
+                {
+                    "roll": students.get("roll_no"),
+                    "name": students.get("name"),
+                    "status": r.get("status"),
+                    "Date": row_date,
+                }
+            )
         return pd.DataFrame(rows)
     except Exception:
         return pd.DataFrame()

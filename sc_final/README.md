@@ -1,47 +1,78 @@
-# SnapClass AI 🎓
+# SnapClass AI
 
-AI-powered attendance management SaaS for schools, coaching institutes, and colleges.
+AI-powered attendance management SaaS for institutes, teachers, students, admins, and SnapClass HQ.
 
-## Quick Start
+## Local Development
+
+Run the app from the `sc_final` folder so Streamlit can find `.streamlit/secrets.toml` next to `app.py`:
 
 ```bash
-cd snapclass
-python -m venv .venv
-.venv\Scripts\activate       # Windows
-source .venv/bin/activate    # Mac/Linux
-pip install -r requirements.txt
-streamlit run app.py
+cd "C:\Working Project's\snapclass_final yash\sc_final"
+.\.venv311\Scripts\Activate.ps1
+streamlit run app.py --server.port 8507
 ```
 
-Open: http://localhost:8501
+If you need to create the virtual environment first:
+
+```bash
+py -3.11 -m venv .venv311
+.\.venv311\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+Python 3.11 is required for the current FaceID dependency set.
 
 ## Demo Credentials
 
-| Portal  | Email                | Password   |
-|---------|----------------------|------------|
-| Student | student@snapclass.ai | student123 |
-| Teacher | teacher@snapclass.ai | teacher123 |
-| Admin   | *(password only)*    | admin123   |
+These are for local/demo testing only. Production must use real Supabase Auth users and matching `user_profiles`.
 
-## Supabase Setup (Optional)
+| Portal | Email | Password |
+| --- | --- | --- |
+| Founder | founder@snapclass.ai | `<local-founder-password>` |
+| Teacher | teacher.demo@example.com | `<local-teacher-password>` |
+| Student | student.demo@example.com | `<local-student-password>` |
 
-```bash
-cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-# Fill in your Supabase URL and key
-# Run src/database/schema.sql in Supabase SQL Editor
+## Required Production Secrets
+
+Configure these in Streamlit secrets or the deployment platform. Do not commit `.streamlit/secrets.toml`.
+
+```toml
+APP_ENV = "production"
+DEMO_AUTH_ENABLED = "false"
+APP_PUBLIC_URL = "https://your-public-app-url"
+SUPABASE_URL = "https://YOUR_PROJECT_REF.supabase.co"
+SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY"
+RESEND_API_KEY = "optional-if-email-enabled"
+SENDER_EMAIL = "optional-if-email-enabled"
+RAZORPAY_KEY_ID = "optional-until-payments-enabled"
+RAZORPAY_KEY_SECRET = "optional-until-payments-enabled"
+RAZORPAY_WEBHOOK_SECRET = "required-before-live-payments"
 ```
 
-App runs fully in demo mode without Supabase.
+Never use a Supabase service-role key in this Streamlit frontend app.
 
-## AI Face Recognition (Optional)
+## Production Database Sequence
 
-```bash
-pip install deepface tf-keras opencv-python-headless
-```
+Do not run production RLS until the live attendance flow passes and mappings are correct.
 
-## Deploy to Streamlit Cloud
+1. Back up Supabase.
+2. Run `database/production_schema_preflight.sql`.
+3. Run `database/production_constraints_indexes.sql`.
+4. Create or reset real Supabase Auth users.
+5. Insert/fix `public.user_profiles` for founder, admin, teacher, and student.
+6. Verify teacher assignments, subject enrollments, and attendance writes.
+7. Run `database/remove_demo_policies.sql`.
+8. Run `database/production_rls_policies.sql`.
+9. Re-test founder, admin, teacher, student, FaceID, and reporting flows.
 
-1. Push to GitHub
-2. Go to share.streamlit.io → New App → select repo
-3. Add secrets in Advanced Settings
-4. Deploy
+## Production Status
+
+This repo is not production-ready until:
+
+- live Teacher -> Attendance -> Student Reports works,
+- production RLS is applied and tested,
+- demo allow-all policies are removed,
+- secrets are rotated and protected,
+- face embeddings are protected,
+- app is deployed to a public URL and smoke-tested,
+- payments are verified end-to-end or disabled.

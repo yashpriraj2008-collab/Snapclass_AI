@@ -8,6 +8,7 @@ from src.database.client import get_supabase_client
 
 VALID_STATUSES = {"present", "absent", "late"}
 VALID_MODES = {"manual", "faceid", "ai"}
+VALID_VERIFICATION_METHODS = {"manual", "faceid", "ai"}
 
 
 def _text(value: Any) -> str | None:
@@ -27,6 +28,32 @@ def _clean_mode(value: Any) -> str:
     return mode if mode in VALID_MODES else "manual"
 
 
+def _clean_verification_method(value: Any, fallback: str = "manual") -> str:
+    method = str(value or fallback or "manual").strip().lower()
+    return method if method in VALID_VERIFICATION_METHODS else "manual"
+
+
+def _date_only(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    candidate = text.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(candidate).date().isoformat()
+    except Exception:
+        pass
+
+    if len(text) >= 10:
+        return text[:10]
+    return text
+
+
 def _get_or_create_session(
     supabase,
     *,
@@ -36,17 +63,20 @@ def _get_or_create_session(
     teacher_id: str | None = None,
     institute_id: str | None = None,
     mode: str = "manual",
+    created_by: str | None = None,
 ) -> dict[str, Any]:
     query = (
         supabase.table("attendance_sessions")
         .select("*")
         .eq("class_id", class_id)
         .eq("subject_id", subject_id)
-        .eq("date", attendance_date)
+        .eq("attendance_date", attendance_date)
         .eq("mode", mode)
     )
     if teacher_id:
         query = query.eq("teacher_id", teacher_id)
+    if institute_id:
+        query = query.eq("institute_id", institute_id)
 
     existing = query.limit(1).execute()
     if existing.data:
@@ -55,13 +85,16 @@ def _get_or_create_session(
     payload: dict[str, Any] = {
         "class_id": class_id,
         "subject_id": subject_id,
-        "date": attendance_date,
+        "attendance_date": attendance_date,
         "mode": mode,
+        "status": "completed",
     }
     if teacher_id:
         payload["teacher_id"] = teacher_id
     if institute_id:
         payload["institute_id"] = institute_id
+    if created_by:
+        payload["created_by"] = created_by
 
     supabase.table("attendance_sessions").insert(payload).execute()
 
@@ -70,11 +103,13 @@ def _get_or_create_session(
         .select("*")
         .eq("class_id", class_id)
         .eq("subject_id", subject_id)
-        .eq("date", attendance_date)
+        .eq("attendance_date", attendance_date)
         .eq("mode", mode)
     )
     if teacher_id:
         created_query = created_query.eq("teacher_id", teacher_id)
+    if institute_id:
+        created_query = created_query.eq("institute_id", institute_id)
 
     created = created_query.limit(1).execute()
     if not created.data:
@@ -106,6 +141,7 @@ def create_or_get_attendance_session(
             teacher_id=_text(teacher_id),
             institute_id=_text(institute_id),
             mode=_clean_mode(mode),
+            created_by=_text(teacher_id),
         )
         return session, None
     except Exception as exc:
@@ -118,6 +154,8 @@ def _save_records_for_session(
     records,
     marked_by,
     attendance_date=None,
+    default_verification_method: str = "manual",
+    default_confidence: Any = None,
 ):
     """Save one attendance_records row per student for an existing session."""
     if not session_id:
@@ -137,16 +175,25 @@ def _save_records_for_session(
             errors.append(f"Invalid status for {student_id}: {status}")
             continue
 
+        row_date = _date_only((row or {}).get("attendance_date")) or _date_only(attendance_date)
+        verification_method = _clean_verification_method(
+            (row or {}).get("verification_method") or (row or {}).get("mode"),
+            default_verification_method,
+        )
+        confidence = (row or {}).get("confidence", default_confidence)
+
         payload = {
             "session_id": str(session_id),
             "student_id": student_id,
             "status": status,
             "marked_by": _text(marked_by),
             "marked_at": datetime.utcnow().isoformat(),
+            "verification_method": verification_method,
         }
-        row_date = _text((row or {}).get("attendance_date")) or _text(attendance_date)
         if row_date:
             payload["attendance_date"] = row_date
+        if confidence is not None:
+            payload["confidence"] = confidence
 
         try:
             existing = (
@@ -198,6 +245,7 @@ def mark_manual_attendance(
         records=records,
         marked_by=teacher_id,
         attendance_date=attendance_date,
+        default_verification_method="manual",
     )
 
 
@@ -221,6 +269,8 @@ def save_attendance_records(*args, **kwargs):
             records,
             marked_by,
             kwargs.get("attendance_date"),
+            kwargs.get("verification_method", "manual"),
+            kwargs.get("confidence"),
         )
         return {
             "success": ok,
@@ -262,7 +312,10 @@ def _save_attendance_records_legacy(records: list[dict[str, Any]]) -> dict[str, 
         student_id = _text(record.get("student_id"))
         class_id = _text(record.get("class_id"))
         subject_id = _text(record.get("subject_id"))
-        attendance_date = _text(record.get("attendance_date") or record.get("date"))
+        attendance_date = _date_only(record.get("attendance_date") or record.get("date"))
+        mode = _clean_mode(record.get("mode"))
+        verification_method = _clean_verification_method(record.get("verification_method"), mode)
+        confidence = record.get("confidence")
 
         if not all([student_id, class_id, subject_id, attendance_date]):
             skipped += 1
@@ -278,7 +331,9 @@ def _save_attendance_records_legacy(records: list[dict[str, Any]]) -> dict[str, 
                 "marked_by": _text(record.get("marked_by") or record.get("teacher_id")),
                 "teacher_id": _text(record.get("teacher_id") or record.get("marked_by")),
                 "institute_id": _text(record.get("institute_id")),
-                "mode": _clean_mode(record.get("mode")),
+                "mode": mode,
+                "verification_method": verification_method,
+                "confidence": confidence,
             }
         )
 
@@ -315,6 +370,7 @@ def _save_attendance_records_legacy(records: list[dict[str, Any]]) -> dict[str, 
                 teacher_id=first.get("teacher_id"),
                 institute_id=first.get("institute_id"),
                 mode=mode,
+                created_by=first.get("teacher_id"),
             )
             session_id = session.get("id")
             if not session_id:
@@ -329,6 +385,8 @@ def _save_attendance_records_legacy(records: list[dict[str, Any]]) -> dict[str, 
                     "attendance_date": record["attendance_date"],
                     "class_id": record["class_id"],
                     "subject_id": record["subject_id"],
+                    "verification_method": record.get("verification_method"),
+                    "confidence": record.get("confidence"),
                 }
                 for record in group
             ]
@@ -339,6 +397,8 @@ def _save_attendance_records_legacy(records: list[dict[str, Any]]) -> dict[str, 
                 rows,
                 first.get("marked_by") or first.get("teacher_id"),
                 attendance_date,
+                default_verification_method=first.get("verification_method") or mode,
+                default_confidence=first.get("confidence"),
             )
             if not ok:
                 raise RuntimeError(message)
@@ -361,16 +421,42 @@ def _flatten_attendance_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
     for row in rows:
         item = dict(row)
         session = item.pop("attendance_sessions", None) or {}
+        session_date = _date_only(
+            session.get("attendance_date")
+            or session.get("date")
+            or session.get("created_at")
+            or session.get("marked_at")
+        )
+        record_date = _date_only(
+            item.get("attendance_date")
+            or item.get("marked_at")
+            or item.get("created_at")
+        )
         if session:
-            item.setdefault("attendance_date", session.get("date"))
+            item.setdefault("attendance_date", session_date)
             item.setdefault("class_id", session.get("class_id"))
             item.setdefault("subject_id", session.get("subject_id"))
             item.setdefault("mode", session.get("mode"))
             item.setdefault("teacher_id", session.get("teacher_id"))
-        if "status" in item:
+            item.setdefault("session_status", session.get("status"))
+            item.setdefault("created_by", session.get("created_by"))
+        if not item.get("attendance_date"):
+            item["attendance_date"] = record_date or session_date
+        if "status" in item and item["status"] is not None:
             item["status"] = str(item["status"]).lower()
+        if "verification_method" in item and item["verification_method"] is not None:
+            item["verification_method"] = str(item["verification_method"]).lower()
         flattened.append(item)
     return flattened
+
+
+def _filtered_by_date(rows: list[dict[str, Any]], attendance_date: str | None) -> list[dict[str, Any]]:
+    if not attendance_date:
+        return rows
+    target = _date_only(attendance_date)
+    if not target:
+        return rows
+    return [row for row in rows if _date_only(row.get("attendance_date")) == target]
 
 
 def get_student_attendance_records(supabase, student_id: str) -> list[dict[str, Any]]:
@@ -381,7 +467,7 @@ def get_student_attendance_records(supabase, student_id: str) -> list[dict[str, 
     try:
         response = (
             supabase.table("attendance_records")
-            .select("*, attendance_sessions(date, class_id, subject_id, mode, teacher_id)")
+            .select("*, attendance_sessions(attendance_date, date, class_id, subject_id, mode, teacher_id, created_by, status, created_at, updated_at)")
             .eq("student_id", student_id)
             .order("marked_at", desc=True)
             .execute()
@@ -392,7 +478,33 @@ def get_student_attendance_records(supabase, student_id: str) -> list[dict[str, 
     except Exception:
         pass
 
-    return []
+    try:
+        response = (
+            supabase.table("attendance_records")
+            .select("*")
+            .eq("student_id", student_id)
+            .order("marked_at", desc=True)
+            .execute()
+        )
+        rows = response.data or []
+        session_ids = sorted({row.get("session_id") for row in rows if row.get("session_id")})
+        sessions_by_id: dict[str, dict[str, Any]] = {}
+        if session_ids:
+            sessions = (
+                supabase.table("attendance_sessions")
+                .select("id,attendance_date,date,class_id,subject_id,mode,teacher_id,created_by,status,created_at,updated_at")
+                .in_("id", session_ids)
+                .execute()
+            )
+            sessions_by_id = {str(row.get("id")): row for row in sessions.data or []}
+
+        for row in rows:
+            session = sessions_by_id.get(str(row.get("session_id")))
+            if session:
+                row["attendance_sessions"] = session
+        return _flatten_attendance_rows(rows)
+    except Exception:
+        return []
 
 
 def get_session_attendance_records(
@@ -407,15 +519,18 @@ def get_session_attendance_records(
         return []
 
     try:
-        query = supabase.table("attendance_records").select("*, attendance_sessions(date, class_id, subject_id, mode, teacher_id)")
+        query = supabase.table("attendance_records").select(
+            "*, attendance_sessions(attendance_date, date, class_id, subject_id, mode, teacher_id, created_by, status, created_at, updated_at)"
+        )
         if class_id:
             query = query.eq("class_id", class_id)
         if subject_id:
             query = query.eq("subject_id", subject_id)
-        if attendance_date:
-            query = query.eq("attendance_date", attendance_date)
         response = query.order("marked_at", desc=True).execute()
-        return _flatten_attendance_rows(response.data or [])
+        rows = _flatten_attendance_rows(response.data or [])
+        if attendance_date:
+            rows = _filtered_by_date(rows, attendance_date)
+        return rows
     except Exception:
         return []
 

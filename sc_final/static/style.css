@@ -1742,6 +1742,140 @@ div[role="option"]:hover {
     }
 }
 
+/* =====================================================
+   Global Streamlit Form Control Visibility Fix
+   Keeps selectbox/input/number text and icons readable.
+   ===================================================== */
+
+/* Selectbox container */
+div[data-baseweb="select"],
+div[data-baseweb="select"] > div {
+    background-color: #ffffff !important;
+    color: #111827 !important;
+    border: 1px solid #d1d5db !important;
+    border-radius: 14px !important;
+    min-height: 48px !important;
+    box-shadow: none !important;
+}
+
+/* Selectbox visible text */
+div[data-baseweb="select"] span,
+div[data-baseweb="select"] div {
+    color: #111827 !important;
+    -webkit-text-fill-color: #111827 !important;
+    opacity: 1 !important;
+}
+
+/* Selectbox input/search text */
+div[data-baseweb="select"] input {
+    color: #111827 !important;
+    -webkit-text-fill-color: #111827 !important;
+    background-color: transparent !important;
+}
+
+/* Selectbox dropdown arrow/icon */
+div[data-baseweb="select"] svg {
+    color: #111827 !important;
+    fill: #111827 !important;
+}
+
+/* Dropdown menu */
+div[data-baseweb="popover"] {
+    z-index: 999999 !important;
+}
+
+div[role="listbox"],
+ul[role="listbox"] {
+    background-color: #ffffff !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 12px !important;
+}
+
+div[role="option"],
+li[role="option"] {
+    color: #111827 !important;
+    -webkit-text-fill-color: #111827 !important;
+    background-color: #ffffff !important;
+}
+
+div[role="option"]:hover,
+li[role="option"]:hover {
+    background-color: #f3f4f6 !important;
+    color: #111827 !important;
+}
+
+/* Text inputs */
+input,
+textarea {
+    background-color: #ffffff !important;
+    color: #111827 !important;
+    -webkit-text-fill-color: #111827 !important;
+    border-radius: 12px !important;
+}
+
+/* Placeholder text */
+input::placeholder,
+textarea::placeholder {
+    color: #9ca3af !important;
+    -webkit-text-fill-color: #9ca3af !important;
+    opacity: 1 !important;
+}
+
+/* Number input wrapper */
+div[data-testid="stNumberInput"] input {
+    background-color: #ffffff !important;
+    color: #111827 !important;
+    -webkit-text-fill-color: #111827 !important;
+}
+
+/* Number input +/- buttons */
+div[data-testid="stNumberInput"] button {
+    background-color: #f3f4f6 !important;
+    color: #111827 !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 10px !important;
+    box-shadow: none !important;
+}
+
+div[data-testid="stNumberInput"] button svg {
+    color: #111827 !important;
+    fill: #111827 !important;
+}
+
+/* Form submit buttons */
+div[data-testid="stFormSubmitButton"] button {
+    background: linear-gradient(135deg, #6366f1, #ec4899) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: none !important;
+    border-radius: 14px !important;
+    font-weight: 800 !important;
+    min-height: 48px !important;
+}
+
+div[data-testid="stFormSubmitButton"] button * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+
+/* Normal buttons */
+.stButton > button {
+    color: #111827 !important;
+    border-radius: 14px !important;
+    min-height: 44px !important;
+}
+
+/* Primary action buttons if custom class is used */
+.primary-action-button,
+.generate-code-button {
+    background: linear-gradient(135deg, #6366f1, #ec4899) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    border: none !important;
+    border-radius: 14px !important;
+    font-weight: 800 !important;
+}
+
 /* ==============================
    Platform Features Section Fix
    ============================== */

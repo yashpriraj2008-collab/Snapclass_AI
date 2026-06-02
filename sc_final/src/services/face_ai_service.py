@@ -38,10 +38,10 @@ def is_deepface_available() -> bool:
 
 
 def deepface_error_message() -> Optional[str]:
-    """Return the real DeepFace import error message (if any)."""
+    """Return a user-safe DeepFace availability message."""
     if DEEPFACE_AVAILABLE:
         return None
-    return DEEPFACE_ERROR or "DeepFace could not load."
+    return "FaceID AI engine is unavailable in this beta environment."
 
 
 def _get_deepface():
@@ -205,10 +205,11 @@ def check_face_enrolled(
 ) -> tuple[bool, Any]:
     """Check if a face is enrolled in Supabase.
 
-    Priority order (as requested):
+    Priority order:
       1) student_id
-      2) user_email
-      3) roll_no
+      2) auth/user_id
+      3) user_email
+      4) roll_no
 
     This is defensive against missing columns in some deployments.
     """
@@ -216,6 +217,7 @@ def check_face_enrolled(
         return False, None
 
     student_id = student_identity.get("student_id")
+    user_id = student_identity.get("user_id") or student_identity.get("auth_user_id")
     user_email = student_identity.get("user_email")
     roll_no = student_identity.get("roll_no")
 
@@ -234,6 +236,32 @@ def check_face_enrolled(
                     return True, result.data[0]
             except Exception:
                 pass
+
+        if user_id:
+            try:
+                result = (
+                    supabase.table("face_embeddings")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .eq("status", "active")
+                    .limit(1)
+                    .execute()
+                )
+                if result.data:
+                    return True, result.data[0]
+            except Exception:
+                try:
+                    result = (
+                        supabase.table("face_embeddings")
+                        .select("*")
+                        .eq("user_id", user_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    if result.data:
+                        return True, result.data[0]
+                except Exception:
+                    pass
 
         if user_email:
             try:
@@ -276,7 +304,7 @@ def save_face_embedding_to_supabase(
 ) -> Any:
     """Save embedding into face_embeddings.
 
-    Stores embedding as json.dumps(embedding) into text column.
+    Stores embedding with required student/user/institute/consent/status metadata.
     Re-checks Supabase after upsert to confirm the row exists.
 
     Uses student_id/user_email/roll_no if available, but remains compatible
@@ -286,41 +314,69 @@ def save_face_embedding_to_supabase(
         raise RuntimeError("Supabase client unavailable.")
 
     student_id = student_identity.get("student_id")
-    user_id = student_identity.get("user_id")
+    user_id = student_identity.get("user_id") or student_identity.get("auth_user_id")
+    institute_id = student_identity.get("institute_id")
     user_email = student_identity.get("user_email")
     user_name = student_identity.get("user_name")
     name = student_identity.get("name")
     roll_no = student_identity.get("roll_no")
 
     payload: dict[str, Any] = {
+        "institute_id": institute_id,
         "student_id": student_id,
         "user_id": user_id,
         "user_email": user_email,
         "user_name": user_name,
         "name": user_name or name or "Student",
         "roll_no": roll_no or user_email or str(student_id) or "UNKNOWN",
-        "embedding": json.dumps(embedding),
+        "embedding": embedding,
+        "embedding_model": "deepface-facenet",
+        "consent_given": True,
+        "consent_at": datetime.utcnow().isoformat(),
+        "status": "active",
         "updated_at": datetime.utcnow().isoformat(),
     }
 
     payload = {k: v for k, v in payload.items() if v is not None}
 
-    # Prefer upsert on student_id if available, else fall back to roll_no.
-    on_conflict = "student_id" if payload.get("student_id") else "roll_no"
-
     try:
         db = supabase
-        db.table("face_embeddings").upsert(payload, on_conflict=on_conflict).execute()
+        enrolled, row = check_face_enrolled(db, student_identity)
+        if enrolled and isinstance(row, dict) and row.get("id"):
+            db.table("face_embeddings").update(payload).eq("id", row["id"]).execute()
+        else:
+            db.table("face_embeddings").insert(payload).execute()
 
         # Re-query immediately to verify.
-        # The helper already implements priority: student_id -> user_email -> roll_no.
+        # The helper implements priority: student_id -> user_id -> user_email -> roll_no.
         enrolled, row = check_face_enrolled(db, student_identity)
         if not enrolled:
             raise RuntimeError("Face embedding saved, but verification re-query failed.")
 
         return row
     except Exception as e:
-        return {"error": repr(e)}
+        try:
+            compat_payload = dict(payload)
+            compat_payload["embedding"] = json.dumps(embedding)
+            for optional_col in [
+                "embedding_model",
+                "consent_given",
+                "consent_at",
+                "status",
+                "institute_id",
+            ]:
+                compat_payload.pop(optional_col, None)
+            enrolled, row = check_face_enrolled(supabase, student_identity)
+            if enrolled and isinstance(row, dict) and row.get("id"):
+                supabase.table("face_embeddings").update(compat_payload).eq("id", row["id"]).execute()
+            else:
+                supabase.table("face_embeddings").insert(compat_payload).execute()
+            enrolled, row = check_face_enrolled(supabase, student_identity)
+            if enrolled:
+                return row
+        except Exception:
+            pass
+        return {"error": "Face enrollment could not be saved. Please check FaceID database schema."}
 
 
 

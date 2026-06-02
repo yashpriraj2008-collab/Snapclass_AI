@@ -104,6 +104,8 @@ def show_attendance():
         key="att_class_select",
     )
     selected_class_id = class_options.get(class_label) if class_label else None
+    if class_label:
+        st.caption(f"Selected Class: {class_label}")
 
     subjects = _load_subjects(inst_id, selected_class_id)
     subject_options = {
@@ -124,6 +126,8 @@ def show_attendance():
         key="att_subject_select",
     )
     selected_subject_id = subject_options.get(subject_label) if subject_label else None
+    if subject_label:
+        st.caption(f"Selected Subject: {subject_label}")
 
     date = st.date_input("Date *", key="att_date_pick")
     date_str = date.strftime("%Y-%m-%d")
@@ -186,5 +190,5 @@ def show_attendance():
             st.error(f"Attendance not saved: {message}")
             if errors:
                 st.caption("; ".join(errors[:5]))
-    except Exception as e:
-        st.exception(e)
+    except Exception:
+        st.error("Attendance could not be saved. Please retry or contact support.")

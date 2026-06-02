@@ -4,15 +4,24 @@ import streamlit as st
 
 from src.components.navigation import go_to
 from src.components.public_nav import render_public_nav
-from src.services.payment_service import create_order, is_razorpay_connected, save_successful_payment
+from src.database.client import read_app_secrets
+from src.services.payment_service import create_razorpay_order, get_plan, is_razorpay_connected
+from src.utils.user_guards import show_payment_not_configured
 
 
-def go_to_plan(plan_name: str) -> None:
-    st.session_state.selected_plan = plan_name
-    st.session_state.role = "institute_admin"
-    st.session_state.page = "institute_setup"
-    st.session_state.current_page = "institute_setup"
+def go_to_plan(plan_code: str, plan_name: str | None = None) -> None:
+    plan_code_norm = (plan_code or "").strip().lower()
+    plan_name_norm = (plan_name or plan_code_norm).strip().title()
+
+    st.session_state["selected_plan_code"] = plan_code_norm
+    st.session_state["selected_plan"] = plan_code_norm  # backward compat
+    st.session_state["selected_plan_name"] = plan_name_norm
+
+    st.session_state["return_to"] = "pricing"
+    st.session_state.page = "demo_signup"
+    st.session_state.current_page = "demo_signup"
     st.rerun()
+
 
 
 PLANS = [
@@ -165,7 +174,7 @@ def show_pricing() -> None:
                 margin:0 auto 14px;box-shadow:0 6px 16px rgba(0,0,0,.1);">{plan['icon']}</div>
               <h3 style="margin:0 0 4px;">{plan['name']}</h3>
               <div style="font-size:1.8rem;font-weight:900;color:{plan['color']};margin:8px 0 4px;">
-                {plan['price']}<span style="font-size:.9rem;color:#6B7280;font-weight:500;">{plan['period']}</span>
+                {plan['price']} <span style="font-size:.9rem;color:#6B7280;font-weight:500;">{plan['period']}</span>
               </div>
               <p style="color:#6B7280;font-size:.83rem;margin:0 0 16px;">{plan['desc']}</p>
               <div style="text-align:left;margin-bottom:18px;">{feats}</div>
@@ -175,14 +184,77 @@ def show_pricing() -> None:
 
             btn_t = "primary" if pop else "secondary"
             if st.button(plan["cta"], key=f"pricing_{plan['name'].lower()}", type=btn_t, use_container_width=True):
-                if plan["name"] == "Demo":
-                    go_to_plan("demo")
-                elif plan["name"] == "Starter":
-                    go_to_plan("starter")
-                elif plan["name"] == "Pro":
-                    go_to_plan("pro")
-                elif plan["name"] == "Enterprise":
-                    st.session_state.selected_plan = "enterprise"
+                plan_name = plan["name"].strip().lower()
+
+                # Demo: activate without payment
+                if plan_name == "demo":
+                    go_to_plan("demo", "Demo")
+
+                # Starter/Pro: create Razorpay order (test mode) and open checkout
+                elif plan_name in {"starter", "pro"}:
+                    institute_id = st.session_state.get("institute_id")
+                    user_id = st.session_state.get("user_id") or st.session_state.get("auth_user_id")
+                    if not institute_id or not user_id:
+                        # Persist selected plan; user will continue on signup.
+                        go_to_plan(plan_name, plan_name.title())
+                        return
+
+                    if not is_razorpay_connected():
+                        show_payment_not_configured()
+                        return
+
+                    # Context must be set when institute admin is logged in.
+                    if plan_name == "starter":
+                        plan_code = "starter"
+                    else:
+                        plan_code = "pro"
+
+                    # Persist selection for the signup screen in case user returns.
+                    st.session_state["selected_plan_code"] = plan_code
+                    st.session_state["selected_plan_name"] = plan_name.title()
+
+                    try:
+                        order = create_razorpay_order(
+                            plan_code=plan_code,
+                            institute_id=str(institute_id),
+                            user_id=str(user_id),
+                        )
+
+                    except Exception:
+                        st.warning("Razorpay order could not be created. Please check payment configuration.")
+                        with st.expander("Developer Debug", expanded=False):
+                            st.code("Payment order creation failed.")
+                        return
+
+                    order_id = order["order_id"]
+                    amount = order["amount"]
+                    currency = order["currency"]
+                    key_id = order["key_id"]
+
+                    # Razorpay checkout UI.
+                    # Note: Razorpay checkout JS needs an order_id; signature will be verified on success page.
+                    secrets = read_app_secrets()
+                    import razorpay
+
+                    client = razorpay.Client(auth=(key_id, secrets.get("RAZORPAY_KEY_SECRET")))
+
+                    # Create a checkout link via embedded modal is out of scope here.
+                    # For Phase 5 Part A demo, we route to success page and pass query params.
+                    st.session_state.page = "payment_success"
+                    st.session_state.current_page = "payment_success"
+                    st.query_params["razorpay_order_id"] = order_id
+                    st.query_params["amount"] = str(amount)
+                    st.query_params["currency"] = currency
+                    st.query_params["plan_code"] = plan_code
+                    st.query_params["plan_id"] = str(order.get("plan_id") or "")
+                    st.rerun()
+
+# Enterprise: contact sales
+                elif plan_name == "enterprise":
+                    # Enterprise: contact sales only (no signup form)
+                    st.session_state["selected_plan_code"] = "enterprise"
+                    st.session_state["selected_plan_name"] = "Enterprise"
+                    st.session_state["selected_plan"] = "enterprise"  # backward compat
                     st.session_state.page = "contact"
                     st.session_state.current_page = "contact"
                     st.rerun()

@@ -6,6 +6,7 @@ create table if not exists user_profiles (
   email text unique not null,
   full_name text,
   role text not null,
+  status text default 'active',
   subject text nullable,
   roll_no text nullable,
   class_name text nullable,
@@ -17,6 +18,9 @@ create table if not exists user_profiles (
 -- Helpful indexes
 create index if not exists user_profiles_user_id_idx on user_profiles(user_id);
 create index if not exists user_profiles_role_idx on user_profiles(role);
+create index if not exists user_profiles_email_idx on user_profiles(email);
+
+alter table user_profiles add column if not exists status text default 'active';
 
 
 -- Row Level Security
@@ -36,4 +40,3 @@ begin
 
   execute 'create policy allow_all on user_profiles for all using (true) with check (true)';
 end$$;
-

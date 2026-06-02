@@ -11,9 +11,9 @@ from src.database.queries import get_subjects
 from src.services.attendance_service import save_attendance_records
 from src.services.face_ai_service import (
     check_face_enrolled,
+    cosine_similarity,
     deepface_error_message,
     generate_face_embedding,
-    identify_matching_face,
     is_deepface_available,
     save_face_embedding_to_supabase,
 )
@@ -21,6 +21,7 @@ from src.services.face_service import check_image_quality
 from src.services.student_identity import resolve_student_identity
 from src.services.subject_service import get_subject_by_name
 from src.utils.session import nav_student
+from src.utils.user_guards import show_faceid_not_enrolled, show_faceid_unavailable
 
 
 def show_faceid() -> None:
@@ -28,6 +29,10 @@ def show_faceid() -> None:
 
     ai_ready = is_deepface_available()
     if not ai_ready:
+        show_faceid_unavailable()
+        with st.expander("Developer Debug", expanded=False):
+            st.code(deepface_error_message() or "FaceID engine unavailable.")
+        return
         err = deepface_error_message() or "DeepFace could not load."
         st.markdown(
             f"""
@@ -57,7 +62,10 @@ def _get_identity(supabase) -> dict[str, Any] | None:
 
     return {
         "student_id": student_id,
-        "user_id": st.session_state.get("user_id"),
+        "user_id": st.session_state.get("auth_user_id") or st.session_state.get("user_id"),
+        "auth_user_id": st.session_state.get("auth_user_id") or st.session_state.get("user_id"),
+        "institute_id": st.session_state.get("institute_id")
+        or (st.session_state.get("student_profile") or {}).get("institute_id"),
         "user_email": st.session_state.get("student_email") or st.session_state.get("user_email"),
         "user_name": st.session_state.get("student_name") or st.session_state.get("user_name"),
         "roll_no": st.session_state.get("roll_no") or st.session_state.get("user_roll"),
@@ -73,11 +81,11 @@ def _enroll_tab(ai_ready: bool) -> None:
     st.caption("Enroll once. After enrollment you can mark attendance with FaceID.")
 
     if not supabase:
-        st.warning("Supabase is not connected. Face enrollment is unavailable.")
+        st.warning("Supabase is not configured. Add .streamlit/secrets.toml.")
         return
 
     if not identity or not identity.get("student_id"):
-        st.error("Student identity missing. Please log in again so the app can map your email to public.students.id.")
+        st.warning("Please login first.")
         return
 
     st.caption(f"Student: {identity.get('user_name') or 'Student'} | Roll: {identity.get('roll_no') or '—'}")
@@ -101,8 +109,9 @@ def _enroll_tab(ai_ready: bool) -> None:
         disabled=not ai_ready,
     ):
         if not ai_ready:
-            st.error("Face enrollment failed: DeepFace could not load.")
-            st.code(deepface_error_message() or "DeepFace unavailable.")
+            show_faceid_unavailable()
+            with st.expander("Developer Debug", expanded=False):
+                st.code(deepface_error_message() or "FaceID engine unavailable.")
             return
 
         quality = check_image_quality(img_bytes)
@@ -114,7 +123,9 @@ def _enroll_tab(ai_ready: bool) -> None:
             embedding, error = generate_face_embedding(img_bytes)
 
         if error or embedding is None:
-            st.error(f"Face enrollment failed: {error or 'Face embedding could not be generated.'}")
+            st.error("Face enrollment failed. Please use a clear front-facing photo and try again.")
+            with st.expander("Developer Debug", expanded=False):
+                st.code(error or "Face embedding could not be generated.")
             return
 
         result = save_face_embedding_to_supabase(
@@ -125,7 +136,8 @@ def _enroll_tab(ai_ready: bool) -> None:
 
         if isinstance(result, dict) and result.get("error"):
             st.error("Face enrollment failed.")
-            st.code(result.get("error"))
+            with st.expander("Developer Debug", expanded=False):
+                st.code(result.get("error"))
             return
 
         enrolled, row = check_face_enrolled(supabase, identity)
@@ -148,11 +160,11 @@ def _mark_tab(ai_ready: bool) -> None:
     identity = _get_identity(supabase) if supabase else None
 
     if not supabase:
-        st.warning("Supabase is not connected. FaceID attendance is unavailable.")
+        st.warning("Supabase is not configured. Add .streamlit/secrets.toml.")
         return
 
     if not identity or not identity.get("student_id"):
-        st.error("Student identity missing. Please log in again so the app can map your email to public.students.id.")
+        st.warning("Please login first.")
         return
 
     subjects_df = get_subjects()
@@ -303,9 +315,9 @@ def _verify_and_mark(
         st.warning(q["message"])
         return
 
-    enrolled, _row = check_face_enrolled(supabase, identity)
+    enrolled, enrolled_row = check_face_enrolled(supabase, identity)
     if not enrolled:
-        st.warning("Face not enrolled yet. Please enroll your face first.")
+        show_faceid_not_enrolled()
         st.info("Go to FaceID Attendance → Enroll My Face.")
         return
 
@@ -321,15 +333,32 @@ def _verify_and_mark(
         pass
 
     if not ai_ready:
-        st.error("Real AI attendance requires DeepFace. Activate Python 3.11 venv and install the required packages.")
-        st.code(deepface_error_message() or "DeepFace unavailable.")
+        show_faceid_unavailable()
+        with st.expander("Developer Debug", expanded=False):
+            st.code(deepface_error_message() or "FaceID engine unavailable.")
         return
 
     with st.spinner("Verifying..."):
-        match = identify_matching_face(img_bytes, threshold=0.40)
+        live_embedding, embed_error = generate_face_embedding(img_bytes)
 
-    if not match.get("match"):
-        st.error("❌ No enrolled student matched")
+    if embed_error or live_embedding is None:
+        st.error("Face could not be verified. Please use a clear front-facing photo and try again.")
+        with st.expander("Developer Debug", expanded=False):
+            st.code(embed_error or "Face embedding could not be generated.")
+        return
+
+    import json
+
+    try:
+        stored_raw = (enrolled_row or {}).get("embedding")
+        stored_embedding = stored_raw if isinstance(stored_raw, list) else json.loads(stored_raw or "[]")
+        score = cosine_similarity(live_embedding, stored_embedding)
+    except Exception:
+        st.error("Face enrollment data could not be verified. Please enroll again.")
+        return
+
+    if score < 0.40:
+        st.error("Face did not match your enrolled FaceID.")
         return
 
     subject_id, class_id = _resolve_subject_and_class(supabase, subject_name)
@@ -339,23 +368,57 @@ def _verify_and_mark(
         st.error("Attendance could not be saved: missing student/class/subject IDs.")
         return
 
-    save_attendance_records(
-        [
-            {
-                "student_id": str(student_id),
-                "class_id": str(class_id),
-                "subject_id": str(subject_id),
-                "attendance_date": att_date,
-                "status": "present",
-                "marked_by": st.session_state.get("user_id") or "faceid",
-                "mode": "faceid",
-            }
-        ]
-    )
+    try:
+        session_res = (
+            supabase.table("attendance_sessions")
+            .insert(
+                {
+                    "class_id": str(class_id),
+                    "subject_id": str(subject_id),
+                    "institute_id": identity.get("institute_id"),
+                    "attendance_date": att_date,
+                    "mode": "faceid",
+                    "status": "completed",
+                    "created_by": identity.get("user_id") or identity.get("auth_user_id") or student_id,
+                }
+            )
+            .execute()
+        )
+        session_rows = session_res.data or []
+        if not session_rows or not session_rows[0].get("id"):
+            raise RuntimeError("attendance_sessions insert returned no id")
+
+        confidence = round(max(0.0, min(100.0, (score + 1) * 50)), 1)
+
+        result = save_attendance_records(
+            supabase,
+            session_rows[0]["id"],
+            [
+                {
+                    "student_id": str(student_id),
+                    "attendance_date": att_date,
+                    "status": "present",
+                    "verification_method": "faceid",
+                    "confidence": confidence,
+                }
+            ],
+            identity.get("user_id") or identity.get("auth_user_id"),
+            attendance_date=att_date,
+            verification_method="faceid",
+            confidence=confidence,
+        )
+    except Exception as exc:
+        result = {"success": False, "error": str(exc)}
+
+    if not result.get("success"):
+        st.error("Attendance could not be saved. Please try again or ask your teacher to mark manual attendance.")
+        with st.expander("Developer Debug", expanded=False):
+            st.code(result.get("error") or result.get("message") or "Unknown save failure")
+        return
 
     st.session_state.faceid_step = "confirmed"
     st.session_state.faceid_subject = subject_name
-    st.session_state.faceid_confidence = match.get("confidence", 0)
+    st.session_state.faceid_confidence = round(max(0.0, min(100.0, (score + 1) * 50)), 1)
     st.rerun()
 
 
