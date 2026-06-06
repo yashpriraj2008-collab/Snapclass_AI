@@ -30,6 +30,7 @@ def _set_admin_session(result: dict) -> None:
             "onboarding_completed": False,
         }
         st.session_state.active_institute_id = institute_id
+        st.session_state.current_institute_id = institute_id
         st.session_state.active_institute_name = ""
 
     st.session_state.logged_in = True
@@ -44,6 +45,7 @@ def _set_admin_session(result: dict) -> None:
     st.session_state.user_id = auth_user_id
     st.session_state.institute_id = institute_id
     st.session_state.active_institute_id = institute_id
+    st.session_state.current_institute_id = institute_id
     st.session_state.admin_onboarding_completed = bool(
         institute.get("onboarding_completed", False)
     )
@@ -58,7 +60,7 @@ def show_institute_login() -> None:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("## Admin Login")
-        st.caption("Existing institute admins can sign in here.")
+        st.caption("Sign in, register with an institute code, or create a new institute account.")
 
         with st.form("existing_admin_login_form"):
             email = st.text_input("Admin Email", placeholder="admin@institute.com", key="admin_login_email")
@@ -100,6 +102,6 @@ def show_institute_login() -> None:
         if c2.button("Join Institute with Code", key="admin_join_with_code", use_container_width=True):
             go_to("institute_join")
 
-        if st.button("Start Free Demo", key="admin_start_demo", use_container_width=True):
+        if st.button("Create New Institute", key="admin_create_new_institute", use_container_width=True):
             st.session_state.return_to = "pricing"
             go_to("demo_signup")

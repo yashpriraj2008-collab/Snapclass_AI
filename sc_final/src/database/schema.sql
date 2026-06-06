@@ -27,6 +27,9 @@ create table if not exists school_codes (
   institute_id uuid references institutes(id) on delete cascade,
   admin_email  text,
   status       text default 'unused',
+  used_at      timestamptz,
+  used_by      text,
+  updated_at   timestamptz default now(),
   created_at   timestamptz default now(),
   expires_at   timestamptz
 );

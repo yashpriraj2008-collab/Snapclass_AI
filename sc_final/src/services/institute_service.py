@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import uuid
 
-import pandas as pd
 import streamlit as st
 
 from src.database.client import get_supabase
@@ -81,6 +81,88 @@ def _norm_text(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
+def normalize_code_status(code_row: dict[str, Any] | None) -> str:
+    """Return the user-visible lifecycle status for a school code."""
+    row = code_row or {}
+    status = _norm_text(row.get("status") or "unused")
+    if row.get("used_at") or row.get("used_by"):
+        return "used"
+    if status == "expired" or is_expired(row.get("expires_at")):
+        return "expired"
+    if status == "used":
+        return "used"
+    return "unused"
+
+
+def _hydrate_code_usage_from_profiles(codes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Infer used invite codes when older rows were not marked during onboarding."""
+    if not codes:
+        return codes
+
+    db = _db()
+    if db is None:
+        return codes
+
+    try:
+        profiles = db.table("user_profiles").select("*").execute().data or []
+    except Exception:
+        profiles = []
+
+    try:
+        institutes = db.table("institutes").select("*").execute().data or []
+    except Exception:
+        institutes = []
+
+    admin_profiles: list[dict[str, Any]] = []
+    for profile in profiles:
+        role = _norm_text(profile.get("role"))
+        if role in {"admin", "institute_admin", "super_admin"} and profile.get("institute_id"):
+            admin_profiles.append(profile)
+
+    profiles_by_institute: dict[str, list[dict[str, Any]]] = {}
+    for profile in admin_profiles:
+        profiles_by_institute.setdefault(str(profile.get("institute_id") or ""), []).append(profile)
+
+    institutes_by_id = {str(item.get("id") or ""): item for item in institutes}
+    hydrated: list[dict[str, Any]] = []
+    for code in codes:
+        row = dict(code)
+        if normalize_code_status(row) != "unused":
+            hydrated.append(row)
+            continue
+
+        institute_id = str(row.get("institute_id") or "")
+        admin_email = _norm_text(row.get("admin_email"))
+        matching_profile = None
+        for profile in profiles_by_institute.get(institute_id, []):
+            profile_email = _norm_text(profile.get("email"))
+            if admin_email and profile_email != admin_email:
+                continue
+            matching_profile = profile
+            break
+
+        institute = institutes_by_id.get(institute_id, {})
+        onboarding_done = bool(institute.get("onboarding_completed"))
+        if matching_profile or onboarding_done:
+            row["status"] = "used"
+            row["used_by"] = (
+                row.get("used_by")
+                or (matching_profile or {}).get("email")
+                or row.get("admin_email")
+                or institute.get("admin_email")
+                or ""
+            )
+            row["used_at"] = (
+                row.get("used_at")
+                or (matching_profile or {}).get("created_at")
+                or institute.get("updated_at")
+                or institute.get("created_at")
+                or ""
+            )
+        hydrated.append(row)
+    return hydrated
+
+
 def list_institutes() -> List[Dict[str, Any]]:
     """Return all institutes from Supabase or session_state."""
     db = _db()
@@ -105,7 +187,7 @@ def list_codes() -> List[Dict[str, Any]]:
 
     try:
         data = db.table("school_codes").select("*").order("created_at", desc=True).execute().data or []
-        return data
+        return _hydrate_code_usage_from_profiles(data)
     except Exception:
         init_institute_state()
         return list(st.session_state.codes)
@@ -368,7 +450,7 @@ def validate_access_code(code_value: str) -> Dict[str, Any]:
     if not code_record:
         return {"ok": False, "message": "Invalid institute access code."}
 
-    if code_record.get("status") not in {"unused", "active"}:
+    if normalize_code_status(code_record) == "used":
         return {"ok": False, "message": "This access code has already been used."}
 
     if is_expired(code_record.get("expires_at")):
@@ -387,25 +469,101 @@ def validate_access_code(code_value: str) -> Dict[str, Any]:
 
 
 
-def mark_code_used(code_value: str) -> Dict[str, Any]:
+def _unsupported_columns_from_error(error: Exception, payload: dict[str, Any]) -> list[str]:
+    raw = str(error).lower()
+    return [column for column in payload if column.lower() in raw and "column" in raw]
+
+
+def _update_school_code_usage(db, normalized_code: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    try:
+        return (
+            db.table("school_codes")
+            .update(payload)
+            .eq("code", normalized_code)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as exc:
+        unsupported = _unsupported_columns_from_error(exc, payload)
+        if not unsupported:
+            raise
+        retry = dict(payload)
+        for column in unsupported:
+            retry.pop(column, None)
+        return (
+            db.table("school_codes")
+            .update(retry)
+            .eq("code", normalized_code)
+            .execute()
+            .data
+            or []
+        )
+
+
+def _get_school_code_by_normalized_value(db, normalized_code: str) -> dict[str, Any] | None:
+    try:
+        rows = (
+            db.table("school_codes")
+            .select("*")
+            .eq("code", normalized_code)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return rows[0] if rows else None
+    except Exception:
+        return None
+
+
+def mark_code_used(
+    code_value: str,
+    *,
+    admin_email: str = "",
+    institute_id: str = "",
+) -> Dict[str, Any]:
     """Mark a code as used after onboarding starts."""
+    normalized = str(code_value or "").strip().upper().replace(" ", "")
+    if not normalized:
+        return {"ok": False, "demo": False, "message": "Access code missing."}
+
+    now = datetime.now(timezone.utc).isoformat()
+    payload = {
+        "status": "used",
+        "used_by": str(admin_email or "").strip().lower(),
+        "used_at": now,
+        "updated_at": now,
+    }
+    if institute_id:
+        payload["institute_id"] = institute_id
+
     db = _db()
     if db is None:
         init_institute_state()
         for code in st.session_state.codes:
-            if code.get("code") == code_value:
-                code["status"] = "used"
+            if str(code.get("code") or "").strip().upper().replace(" ", "") == normalized:
+                code.update({k: v for k, v in payload.items() if v})
                 return {"ok": True, "demo": True, "message": "Code marked as used locally."}
         return {"ok": False, "demo": True, "message": "Code not found."}
 
     try:
-        # Normalize matching on read/write as well.
-        normalized = code_value.strip().upper().replace(" ", "")
-        db.table("school_codes").update({"status": "used"}).eq("code", normalized).execute()
-        return {"ok": True, "demo": False, "message": "Code marked as used."}
+        rows = _update_school_code_usage(db, normalized, payload)
+        if not rows:
+            verified = _get_school_code_by_normalized_value(db, normalized)
+            if verified and normalize_code_status(verified) == "used":
+                st.cache_data.clear()
+                return {"ok": True, "demo": False, "data": verified, "message": "Code marked as used."}
+            return {
+                "ok": False,
+                "demo": False,
+                "message": "Code was not marked as used. Check school_codes table or RLS.",
+            }
+        st.cache_data.clear()
+        return {"ok": True, "demo": False, "data": rows[0], "message": "Code marked as used."}
 
     except Exception as exc:
-        return {"ok": False, "demo": False, "message": f"Supabase error: {exc}"}
+        return {"ok": False, "demo": False, "debug": str(exc), "message": "Code could not be marked as used."}
 
 
 def get_institute_by_id(institute_id: str) -> Optional[Dict[str, Any]]:
@@ -431,7 +589,10 @@ def get_institute_by_id(institute_id: str) -> Optional[Dict[str, Any]]:
 
 def set_active_institute(institute: Dict[str, Any], code_value: str = "") -> None:
     """Store the current institute in session_state for institute-admin pages."""
-    st.session_state.active_institute_id = institute.get("id", "")
+    institute_id = institute.get("id", "")
+    st.session_state.active_institute_id = institute_id
+    st.session_state.institute_id = institute_id
+    st.session_state.current_institute_id = institute_id
     st.session_state.active_institute_name = institute.get("name", "")
     st.session_state.current_institute = institute
     st.session_state.active_institute_code = code_value

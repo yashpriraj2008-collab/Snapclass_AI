@@ -5,6 +5,8 @@ from typing import Any
 
 import streamlit as st
 
+from src.utils.perf import perf_enabled
+
 
 def _is_empty(value: Any) -> bool:
     if value is None:
@@ -101,6 +103,6 @@ def show_supabase_not_configured() -> None:
 
 def show_clean_error(message: str, debug: Any | None = None) -> None:
     st.error(message)
-    if debug:
+    if debug and perf_enabled():
         with st.expander("Developer Debug", expanded=False):
             st.code(str(debug))

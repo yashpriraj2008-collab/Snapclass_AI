@@ -1,9 +1,13 @@
 """
-All database queries with automatic demo-data fallback.
-Every function is safe: if Supabase fails → returns demo data, never crashes.
+Shared database query helpers.
+
+Student reads never fall back to demo rows unless development demo mode is
+explicitly enabled with APP_ENV=development and DEMO_DATA_ENABLED=true.
 """
+import os
 from typing import Optional
 import pandas as pd
+import streamlit as st
 from src.database.client import get_supabase
 import src.services.demo_data as demo
 
@@ -24,6 +28,27 @@ def _safe(fn, fallback):
         return fn()
     except Exception:
         return fallback
+
+
+def _demo_data_enabled() -> bool:
+    app_env = str(os.getenv("APP_ENV") or "").strip().lower()
+    enabled = str(os.getenv("DEMO_DATA_ENABLED") or "").strip().lower()
+    try:
+        app_env = app_env or str(st.secrets.get("APP_ENV", "")).strip().lower()
+        enabled = enabled or str(st.secrets.get("DEMO_DATA_ENABLED", "")).strip().lower()
+    except Exception:
+        pass
+    return app_env == "development" and enabled == "true"
+
+
+def _empty_students_df() -> pd.DataFrame:
+    return pd.DataFrame(columns=["id", "roll", "name", "email", "class_name", "attendance"])
+
+
+def _demo_students_df() -> pd.DataFrame:
+    if not _demo_data_enabled():
+        return _empty_students_df()
+    return pd.DataFrame(demo.STUDENTS.copy())
 
 
 # ──────────────────────────────────────────────
@@ -64,6 +89,7 @@ def delete_institute(inst_id: str) -> dict:
 # STUDENTS
 # ──────────────────────────────────────────────
 
+@st.cache_data(ttl=60, show_spinner=False)
 def get_students(class_name: Optional[str] = None) -> pd.DataFrame:
     """Return students DataFrame with columns used across the app.
 
@@ -71,12 +97,14 @@ def get_students(class_name: Optional[str] = None) -> pd.DataFrame:
     """
     db = get_supabase()
     if db is None:
-        df = pd.DataFrame(demo.STUDENTS.copy())
+        df = _demo_students_df()
         if class_name:
+            if "class_name" not in df.columns:
+                return _empty_students_df()
             return pd.DataFrame(df.loc[df["class_name"] == class_name])
         return pd.DataFrame(df)
 
-    fallback = demo.STUDENTS
+    fallback = _empty_students_df()
     return pd.DataFrame(_safe(lambda: _fetch_students(db, class_name), fallback))
 
 
@@ -86,7 +114,7 @@ def _fetch_students(db, class_name: Optional[str]):
         q = q.eq("class_name", class_name)
     data = q.execute().data
     if not data:
-        return demo.STUDENTS.copy()
+        return _empty_students_df()
 
     df = pd.DataFrame(data).rename(columns={"roll_no": "roll"})
 
@@ -110,6 +138,7 @@ def add_student(name: str, email: str, roll: str, class_name: str) -> dict:
         db.table("students").insert({
             "name": name, "email": email, "roll_no": roll, "class_name": class_name
         }).execute()
+        st.cache_data.clear()
         return {"ok": True, "demo": False, "message": f"✅ Student '{name}' added to Supabase."}
     except Exception as e:
         return {"ok": False, "demo": True, "message": f"Error: {e}"}
@@ -129,6 +158,7 @@ def delete_student(student_id: str) -> dict:
 # TEACHERS
 # ──────────────────────────────────────────────
 
+@st.cache_data(ttl=60, show_spinner=False)
 def get_teachers() -> pd.DataFrame:
     db = get_supabase()
     if db is None:
@@ -148,6 +178,7 @@ def add_teacher(name: str, email: str, subject: str, class_name: str = "") -> di
         db.table("teachers").insert({
             "name": name, "email": email, "subject": subject, "class_name": class_name
         }).execute()
+        st.cache_data.clear()
         return {"ok": True, "demo": False, "message": f"✅ Teacher '{name}' added to Supabase."}
     except Exception as e:
         return {"ok": False, "message": f"Error: {e}"}
@@ -167,6 +198,7 @@ def delete_teacher(teacher_id: str) -> dict:
 # SUBJECTS
 # ──────────────────────────────────────────────
 
+@st.cache_data(ttl=60, show_spinner=False)
 def get_subjects(class_name: Optional[str] = None) -> pd.DataFrame:
     db = get_supabase()
     if db is None:
@@ -196,6 +228,7 @@ def add_subject(name: str, class_name: str, teacher_name: str = "") -> dict:
         return {"ok": True, "demo": True, "message": f"'{name}' saved (demo mode)."}
     try:
         db.table("subjects").insert({"name": name, "class_name": class_name}).execute()
+        st.cache_data.clear()
         return {"ok": True, "demo": False, "message": f"✅ Subject '{name}' added to Supabase."}
     except Exception as e:
         return {"ok": False, "message": f"Error: {e}"}
@@ -264,6 +297,7 @@ def save_attendance(records: list) -> dict:
         _save_session(records)
         return {"ok": True, "demo": True,
                 "message": f"⚠️ {saved} saved to Supabase. {len(errors)} error(s) — saved locally as backup."}
+    st.cache_data.clear()
     return {"ok": True, "demo": False,
             "message": f"✅ {saved} attendance records saved to Supabase."}
 
@@ -279,6 +313,7 @@ def _save_session(records: list):
 # ATTENDANCE — READ
 # ──────────────────────────────────────────────
 
+@st.cache_data(ttl=30, show_spinner=False)
 def get_attendance_for_student(roll_no: str) -> pd.DataFrame:
     db = get_supabase()
     if db is None:
@@ -353,6 +388,7 @@ def get_attendance_for_class(class_name: Optional[str], subject_name: str, att_d
     except Exception:
         return pd.DataFrame()
 
+@st.cache_data(ttl=30, show_spinner=False)
 def get_attendance_stats_for_student(roll_no: str) -> dict:
     """Returns {total, present, absent, pct} from Supabase or demo."""
     db = get_supabase()
@@ -410,6 +446,7 @@ def _demo_attendance_history() -> pd.DataFrame:
 # PLATFORM STATS (Admin dashboard)
 # ──────────────────────────────────────────────
 
+@st.cache_data(ttl=30, show_spinner=False)
 def get_platform_stats() -> dict:
     db = get_supabase()
     if db is None:

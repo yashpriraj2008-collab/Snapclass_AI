@@ -17,6 +17,7 @@ from src.services.admin_class_subject_service import (
     list_teachers,
 )
 from src.services.admin_context import get_current_institute_id
+from src.services.admin_teacher_service import list_teacher_assignments
 from src.services.institute_service import _db, init_institute_state
 
 
@@ -64,9 +65,22 @@ def _teacher_label(teacher: dict[str, Any] | None) -> str:
     return f"{name} - {email}" if email else name
 
 
-def _setup_progress(classes: list[dict[str, Any]], subjects: list[dict[str, Any]], students: list[dict[str, Any]], teachers: list[dict[str, Any]]) -> None:
+def _setup_progress(
+    inst_id: str,
+    classes: list[dict[str, Any]],
+    subjects: list[dict[str, Any]],
+    students: list[dict[str, Any]],
+    teachers: list[dict[str, Any]],
+) -> None:
     st.subheader("Setup Progress")
-    assignment_done = any(st.session_state.get("teacher_assignments", []))
+    if _db() and inst_id:
+        assignments = list_teacher_assignments(inst_id)
+    else:
+        assignments = [
+            row for row in st.session_state.get("teacher_assignments", [])
+            if _text(row.get("institute_id")) == _text(inst_id)
+        ]
+    assignment_done = bool(assignments) and bool(classes) and bool(subjects) and bool(teachers)
     items = [
         ("Class created", bool(classes)),
         ("Subject added", bool(subjects)),
@@ -314,7 +328,7 @@ def show_classes_subjects() -> None:
     subjects = _load_subjects(inst_id)
     students = _load_students(inst_id)
     teachers = _load_teachers(inst_id)
-    _setup_progress(classes, subjects, students, teachers)
+    _setup_progress(inst_id, classes, subjects, students, teachers)
 
     tab_cls, tab_sub = st.tabs(["Classes", "Subjects"])
 

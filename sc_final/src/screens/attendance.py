@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from src.services.admin_context import get_current_institute_id
 from src.services.institute_service import init_institute_state, _db
 
 
@@ -80,9 +81,9 @@ def show_attendance():
     init_institute_state()
     st.markdown("### ✅ Attendance")
 
-    inst_id = st.session_state.get("active_institute_id", "")
+    inst_id = get_current_institute_id()
     if not inst_id:
-        st.warning("Please log in again with your access code.")
+        st.warning("Please log in again with your institute admin account.")
         return
 
     classes = _load_classes(inst_id)
@@ -179,6 +180,7 @@ def show_attendance():
             class_id=selected_class_id,
             subject_id=selected_subject_id,
             attendance_date=date_str,
+            institute_id=inst_id,
             records=records,
         )
 

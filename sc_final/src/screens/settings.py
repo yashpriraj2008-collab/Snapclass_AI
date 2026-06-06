@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import streamlit as st
 
+from src.components.avatar import render_profile_photo_section
+from src.services.admin_context import get_current_institute_id
 from src.services.institute_service import init_institute_state, _db
+from src.services.profile_photo_service import fetch_user_profile
 
 
 def _db_safe():
@@ -18,11 +21,11 @@ def show_settings():
     init_institute_state()
     st.markdown("### ⚙️ Settings")
 
-    inst_id = st.session_state.get("active_institute_id", "")
+    inst_id = get_current_institute_id()
     db = _db_safe()
 
     if not inst_id:
-        st.warning("Please log in again with your access code.")
+        st.warning("Please log in again with your institute admin account.")
         return
 
     inst = st.session_state.get("current_institute") or {}
@@ -35,6 +38,30 @@ def show_settings():
                 inst = rows[0]
         except Exception:
             pass
+
+    email_value = str(
+        st.session_state.get("user_email")
+        or st.session_state.get("email")
+        or inst.get("admin_email")
+        or ""
+    ).strip().lower()
+    profile = fetch_user_profile(db, email_value)
+    admin_name = (
+        profile.get("full_name")
+        or inst.get("admin_name")
+        or st.session_state.get("admin_name")
+        or "Admin"
+    )
+    admin_user = {
+        **profile,
+        "name": admin_name,
+        "full_name": admin_name,
+        "email": profile.get("email") or email_value,
+        "role": profile.get("role") or "institute_admin",
+        "profile_photo_url": profile.get("profile_photo_url") or "",
+    }
+    if db:
+        render_profile_photo_section(db, admin_user, key_prefix="admin_profile")
 
     name = st.text_input("Institute Name", value=inst.get("name", ""))
     thr = st.slider(
@@ -68,4 +95,3 @@ def show_settings():
             )
         except Exception as e:
             st.warning(f"Supabase update failed. Settings not saved. Details: {e}")
-

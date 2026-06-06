@@ -12,6 +12,7 @@ from src.services.institute_service import (
     init_institute_state,
     list_codes,
     list_institutes,
+    normalize_code_status,
 )
 from src.utils.session import nav_founder
 
@@ -27,8 +28,11 @@ def _format_expiry(expires_raw: object) -> str:
             return "-"
 
 
-def _render_status(status: object) -> None:
-    status_label = str(status or "unused").strip().lower()
+def _render_status(code_or_status: object) -> None:
+    if isinstance(code_or_status, dict):
+        status_label = normalize_code_status(code_or_status)
+    else:
+        status_label = str(code_or_status or "unused").strip().lower()
     if status_label == "used":
         st.success("Used")
     elif status_label == "expired":
@@ -120,7 +124,7 @@ def render_founder_generate_code() -> None:
                 c1.markdown(f"**{code.get('code', '-')}**")
                 c2.write(institutes_by_id.get(code.get("institute_id", ""), "Unknown Institute"))
                 with c3:
-                    _render_status(code.get("status", "unused"))
+                    _render_status(code)
 
 
 def render_founder_codes() -> None:
@@ -132,9 +136,9 @@ def render_founder_codes() -> None:
 
     codes = list_codes()
     total_codes = count_codes()
-    unused_codes = sum(1 for item in codes if item.get("status", "unused") == "unused")
-    used_codes = sum(1 for item in codes if item.get("status", "unused") == "used")
-    expired_codes = sum(1 for item in codes if item.get("status", "unused") == "expired")
+    unused_codes = sum(1 for item in codes if normalize_code_status(item) == "unused")
+    used_codes = sum(1 for item in codes if normalize_code_status(item) == "used")
+    expired_codes = sum(1 for item in codes if normalize_code_status(item) == "expired")
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Codes", total_codes)
@@ -169,12 +173,16 @@ def render_founder_codes() -> None:
                     st.caption("Access Code")
                 with top_right:
                     st.caption("Status")
-                    _render_status(item.get("status", "unused"))
+                    _render_status(item)
 
                 d1, d2, d3 = st.columns(3)
                 d1.markdown(f"**Institute**  \n{institute_name}")
                 d2.markdown(f"**Admin Email**  \n{admin_email}")
                 d3.markdown(f"**Expires**  \n{expires}")
+                if normalize_code_status(item) == "used":
+                    used_by = item.get("used_by") or admin_email or "-"
+                    used_at = str(item.get("used_at") or "")[:19] or "-"
+                    st.caption(f"Used by {used_by} on {used_at}")
 
                 b1, b2 = st.columns(2)
                 with b1:

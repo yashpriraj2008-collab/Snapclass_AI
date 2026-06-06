@@ -1,7 +1,13 @@
 """First-time institute setup/onboarding."""
+import os
+
 import streamlit as st
 
-from src.services.institute_service import init_institute_state, update_institute
+from src.services.institute_service import init_institute_state, mark_code_used, update_institute
+
+
+def _debug_enabled() -> bool:
+    return str(os.getenv("APP_ENV", "")).strip().lower() == "development" or bool(st.session_state.get("debug_mode"))
 
 
 def show_institute_setup() -> None:
@@ -122,6 +128,16 @@ def show_institute_setup() -> None:
                 st.session_state.user_name = principal
                 st.session_state.admin_name = principal
                 st.session_state.admin_onboarding_completed = True
+                code_value = st.session_state.get("active_institute_code", "")
+                if code_value:
+                    mark_result = mark_code_used(
+                        code_value,
+                        admin_email=st.session_state.get("admin_email") or institute.get("admin_email") or "",
+                        institute_id=inst_id,
+                    )
+                    if not mark_result.get("ok") and _debug_enabled():
+                        with st.expander("Developer Debug", expanded=False):
+                            st.code(str(mark_result.get("debug") or mark_result.get("message") or mark_result))
                 st.session_state.page = "institute_dashboard"
                 st.session_state.institute_page = "institute_dashboard"
                 st.success(f"✅ Welcome to SnapClass AI, {principal}!")

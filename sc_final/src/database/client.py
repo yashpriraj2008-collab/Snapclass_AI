@@ -181,43 +181,35 @@ def _read_secrets() -> tuple[str, str]:
     return url, key
 
 
-def get_supabase_client() -> Client | None:
-    """Return a Supabase client or None."""
-    global _client, _checked, _last_error, _cached_secrets_mtime
-
-    current_mtime = _secrets_mtime()
-    if _checked and current_mtime == _cached_secrets_mtime:
-        return _client
-
-    _checked = True
-    _cached_secrets_mtime = current_mtime
-    _last_error = None
-
+@st.cache_resource(show_spinner=False)
+def _create_supabase_client_cached(current_mtime: float | None) -> tuple[Client | None, str | None]:
     try:
         url, key = _read_secrets()
 
         if not url or not key:
-            _client = None
-            _last_error = SUPABASE_MISSING_MESSAGE
-            return None
+            return None, SUPABASE_MISSING_MESSAGE
 
         if "your-project" in url or url == "https://your-project.supabase.co":
-            _client = None
-            _last_error = "Invalid SUPABASE_URL (still contains your-project placeholder)"
-            return None
+            return None, "Invalid SUPABASE_URL (still contains your-project placeholder)"
 
         if _looks_like_service_role_key(key):
-            _client = None
-            _last_error = "Service-role Supabase keys are not allowed. Use the anon public key."
-            return None
+            return None, "Service-role Supabase keys are not allowed. Use the anon public key."
 
-        _client = create_client(url, key)
-        return _client
+        return create_client(url, key), None
 
     except Exception as e:
-        _client = None
-        _last_error = f"{type(e).__name__}: {e}"
-        return None
+        return None, f"{type(e).__name__}: {e}"
+
+
+def get_supabase_client() -> Client | None:
+    """Return a Streamlit resource-cached Supabase client or None."""
+    global _client, _checked, _last_error, _cached_secrets_mtime
+
+    current_mtime = _secrets_mtime()
+    _checked = True
+    _cached_secrets_mtime = current_mtime
+    _client, _last_error = _create_supabase_client_cached(current_mtime)
+    return _client
 
 
 def debug_supabase_status() -> dict:
@@ -288,6 +280,7 @@ def get_supabase_error() -> str:
 def reset_client():
     """Force re-init (useful after secrets change in dev)."""
     global _client, _checked, _last_error, _cached_secrets_mtime
+    _create_supabase_client_cached.clear()
     _client = None
     _checked = False
     _last_error = None

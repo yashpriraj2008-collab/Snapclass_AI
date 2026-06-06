@@ -1,13 +1,30 @@
 """SnapClass HQ founder dashboard."""
 from __future__ import annotations
 
+import os
 from collections import Counter
 from datetime import datetime, timezone
+from html import escape
+from textwrap import dedent
 from typing import Any
 
 import streamlit as st
 
+APP_ENV = os.getenv("APP_ENV", "development")
+IS_PRODUCTION = APP_ENV == "production"
+
+
+def show_debug(data: Any, title: str = "Developer Debug") -> None:
+    """Show debug output only when not in production."""
+    if IS_PRODUCTION:
+        return
+    with st.expander(title, expanded=False):
+        st.code(str(data), language="python")
+
+
+
 from src.database.client import get_supabase
+
 from src.services.institute_service import (
     activate_institute,
     count_codes,
@@ -16,6 +33,7 @@ from src.services.institute_service import (
     init_institute_state,
     list_codes,
     list_institutes,
+    normalize_code_status,
     update_institute,
 )
 from src.utils.session import nav_founder
@@ -95,7 +113,7 @@ def _status_badge(status: Any) -> None:
     label = _norm(status) or "active"
     if label in {"active", "paid"}:
         st.success(label.title())
-    elif label in {"trial", "trialing", "demo"}:
+    elif label in {"demo", "pending_payment", "payment_pending", "pending"}:
         st.warning(label.title())
     elif label in {"suspended", "disabled", "expired", "test_deleted"}:
         st.error(label.replace("_", " ").title())
@@ -163,6 +181,71 @@ def _render_quick_actions() -> None:
         nav_founder("founder_plans")
 
 
+def render_institute_card(institute: dict[str, Any]) -> None:
+    """Render a clean institute card (no raw IDs / no sensitive fields)."""
+    name = escape(_text(institute.get("name"), "Unnamed Institute"))
+    city = escape(_text(institute.get("city"), "Not set"))
+    state = escape(_text(institute.get("state"), "Not set"))
+    plan = escape(_text(institute.get("plan"), "Free"))
+    status = escape(_text(institute.get("status"), "active").replace("_", " ").title())
+    created_at = escape(_date(institute.get("created_at")))
+
+    # Prefer display names if present; avoid showing admin_email on normal UI.
+    admin_name = escape(_text(institute.get("admin_name"), "Not set"))
+
+    st.markdown(
+        dedent(
+            f"""
+            <div style="
+                background:#ffffff;
+                border:1px solid #e5e7eb;
+                border-radius:18px;
+                padding:20px;
+                margin:10px 0;
+                box-shadow:0 8px 24px rgba(15,23,42,0.06);
+            ">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
+                    <div>
+                        <h2 style="margin:0;color:#111827;font-size:20px;">{name}</h2>
+                        <p style="margin:6px 0 0 0;color:#6b7280;">{city}, {state}</p>
+                        <p style="margin:10px 0 0 0;color:#6b7280;font-size:13px;">Admin: {admin_name}</p>
+                    </div>
+                    <span style="
+                        background:#dcfce7;
+                        color:#166534;
+                        padding:8px 14px;
+                        border-radius:999px;
+                        font-weight:700;
+                        font-size:14px;
+                        white-space:nowrap;
+                    ">{status}</span>
+                </div>
+
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:16px;">
+                    <div>
+                        <p style="color:#6b7280;margin:0;font-size:12px;">Plan</p>
+                        <b style="color:#111827;">{plan}</b>
+                    </div>
+                    <div>
+                        <p style="color:#6b7280;margin:0;font-size:12px;">Status</p>
+                        <b style="color:#111827;">{status}</b>
+                    </div>
+                    <div>
+                        <p style="color:#6b7280;margin:0;font-size:12px;">Created</p>
+                        <b style="color:#111827;">{created_at if created_at != '-' else 'Not set'}</b>
+                    </div>
+                    <div>
+                        <p style="color:#6b7280;margin:0;font-size:12px;">Actions</p>
+                        <b style="color:#111827;">Use tabs below</b>
+                    </div>
+                </div>
+            </div>
+            """
+        ).strip(),
+        unsafe_allow_html=True,
+    )
+
+
 def _render_institute_actions(institute: dict[str, Any], idx: int) -> None:
     institute_id = _text(institute.get("id"), "")
     status = _norm(institute.get("status")) or "active"
@@ -171,20 +254,11 @@ def _render_institute_actions(institute: dict[str, Any], idx: int) -> None:
         t1, t2, t3 = st.tabs(["View", "Edit", "Admin"])
 
         with t1:
-            st.write(
-                {
-                    "id": institute_id,
-                    "name": institute.get("name"),
-                    "city": institute.get("city"),
-                    "state": institute.get("state"),
-                    "admin_email": institute.get("admin_email"),
-                    "plan": institute.get("plan"),
-                    "status": institute.get("status"),
-                    "created_at": institute.get("created_at"),
-                }
-            )
+            render_institute_card(institute)
 
         with t2:
+
+
             with st.form(f"founder_edit_institute_{institute_id or idx}"):
                 name = st.text_input("Institute name", value=_text(institute.get("name"), ""))
                 city = st.text_input("City", value=_text(institute.get("city"), ""))
@@ -206,8 +280,10 @@ def _render_institute_actions(institute: dict[str, Any], idx: int) -> None:
                     )
                     if result.get("ok"):
                         st.success("Institute updated.")
+                        st.cache_data.clear()
                         st.rerun()
-                    st.error("Institute could not be updated.")
+                    else:
+                        st.error("Institute could not be updated.")
 
         with t3:
             link_email = st.text_input(
@@ -219,35 +295,61 @@ def _render_institute_actions(institute: dict[str, Any], idx: int) -> None:
                 result = _link_admin_profile(institute, link_email)
                 if result.get("ok"):
                     st.success(result["message"])
+                    st.cache_data.clear()
                     st.rerun()
+
                 else:
                     st.warning(result.get("message", "Admin could not be linked."))
                     if result.get("debug"):
-                        with st.expander("Developer Debug", expanded=False):
-                            st.code(str(result["debug"]))
+                        show_debug(result.get("debug"))
+
 
         b1, b2, b3 = st.columns(3)
         if status in {"suspended", "disabled"}:
-            if b1.button("Reactivate Institute", key=f"reactivate_{institute_id or idx}", use_container_width=True):
+            if b1.button(
+                "Reactivate Institute",
+                key=f"reactivate_{institute_id or idx}",
+                use_container_width=True,
+            ):
                 result = activate_institute(institute_id)
                 if result.get("ok"):
                     st.success("Institute reactivated.")
+                    st.cache_data.clear()
                     st.rerun()
+
                 st.error("Institute could not be reactivated.")
         else:
-            if b1.button("Suspend Institute", key=f"suspend_{institute_id or idx}", use_container_width=True):
+            if b1.button(
+                "Suspend Institute",
+                key=f"suspend_{institute_id or idx}",
+                use_container_width=True,
+            ):
                 result = update_institute(institute_id, {"status": "suspended"})
                 if result.get("ok"):
                     st.success("Institute suspended.")
+                    st.cache_data.clear()
                     st.rerun()
+
                 st.error("Institute could not be suspended.")
 
-        if b2.button("Delete Test Institute", key=f"delete_test_{institute_id or idx}", use_container_width=True):
-            result = update_institute(institute_id, {"status": "test_deleted"})
-            if result.get("ok"):
-                st.success("Test institute marked as deleted.")
-                st.rerun()
-            st.error("Test institute could not be marked as deleted.")
+        confirm_delete = st.checkbox(
+            "I understand this will permanently remove institute access (soft delete).",
+            key=f"confirm_delete_{institute_id or idx}",
+        )
+
+        if confirm_delete:
+            if b2.button(
+                "Delete Institute",
+                key=f"delete_{institute_id or idx}",
+                use_container_width=True,
+            ):
+                result = update_institute(institute_id, {"status": "deleted"})
+                if result.get("ok"):
+                    st.success("Institute deleted (soft delete).")
+                    st.cache_data.clear()
+                    st.rerun()
+                st.error("Institute could not be deleted.")
+
 
         if b3.button("Generate Code", key=f"dash_code_{institute_id or idx}", use_container_width=True):
             result = create_access_code(
@@ -258,8 +360,10 @@ def _render_institute_actions(institute: dict[str, Any], idx: int) -> None:
             if result.get("ok"):
                 code = (result.get("data") or {}).get("code", "")
                 st.success(f"Access code generated: {code}" if code else "Access code generated.")
+                st.cache_data.clear()
                 st.rerun()
-            st.error(result.get("message", "Access code could not be generated."))
+            else:
+                st.error(result.get("message", "Access code could not be generated."))
 
 
 def render_founder_dashboard() -> None:
@@ -292,11 +396,10 @@ def render_founder_dashboard() -> None:
     duplicate_institute_count = sum(duplicate_counts[key] for key in duplicate_key_set)
 
     active_institutes = sum(1 for inst in institutes if _norm(inst.get("status")) in {"", "active"})
-    trial_institutes = sum(
+    demo_institutes = sum(
         1
         for inst in institutes
-        if _norm(inst.get("plan")) in {"demo", "free demo", "trial"}
-        or _norm(inst.get("subscription_status")) == "trialing"
+        if _norm(inst.get("plan")) in {"demo", "free demo"}
     )
     paid_institutes = sum(
         1
@@ -304,15 +407,15 @@ def render_founder_dashboard() -> None:
         if _norm(inst.get("plan")) in {"starter", "pro", "enterprise"}
         and _norm(inst.get("status")) not in {"suspended", "disabled", "test_deleted"}
     )
-    expired_trials = sum(
+    expired_subscriptions = sum(
         1
         for sub in subscriptions
         if _norm(sub.get("status")) in {"expired", "cancelled"} or _is_expired(sub.get("ends_at"))
     )
     suspended_institutes = sum(1 for inst in institutes if _norm(inst.get("status")) in {"suspended", "disabled"})
 
-    pending_codes = sum(1 for code in codes if _norm(code.get("status")) in {"", "unused", "active"})
-    expired_codes = sum(1 for code in codes if _norm(code.get("status")) == "expired" or _is_expired(code.get("expires_at")))
+    pending_codes = sum(1 for code in codes if normalize_code_status(code) == "unused")
+    expired_codes = sum(1 for code in codes if normalize_code_status(code) == "expired")
 
     now = datetime.now(timezone.utc)
     monthly_revenue = 0.0
@@ -338,7 +441,7 @@ def render_founder_dashboard() -> None:
             pending_payments += 1
         if status in {"failed", "failure"}:
             failed_payments += 1
-    active_subscriptions = sum(1 for sub in subscriptions if _norm(sub.get("status")) in {"active", "trialing"})
+    active_subscriptions = sum(1 for sub in subscriptions if _norm(sub.get("status")) == "active")
 
     s1, s2, s3, s4 = st.columns(4)
     s1.metric("Total Institutes", count_institutes())
@@ -347,7 +450,7 @@ def render_founder_dashboard() -> None:
     s4.metric("Pending Codes", pending_codes)
 
     s5, s6, s7, s8 = st.columns(4)
-    s5.metric("Trial Institutes", trial_institutes)
+    s5.metric("Demo Institutes", demo_institutes)
     s6.metric("Paid Institutes", paid_institutes)
     s7.metric("Institutes Missing Admin", missing_admin_count)
     s8.metric("Duplicate Institute Names", duplicate_institute_count)
@@ -358,9 +461,9 @@ def render_founder_dashboard() -> None:
     st.divider()
     st.subheader("Institute Health")
     h1, h2, h3, h4 = st.columns(4)
-    h1.metric("Trial Institutes", trial_institutes)
+    h1.metric("Demo Institutes", demo_institutes)
     h2.metric("Paid Institutes", paid_institutes)
-    h3.metric("Expired Trials", expired_trials)
+    h3.metric("Expired Subscriptions", expired_subscriptions)
     h4.metric("Suspended Institutes", suspended_institutes)
 
     st.subheader("Revenue")

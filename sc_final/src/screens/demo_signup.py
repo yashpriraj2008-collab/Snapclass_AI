@@ -1,4 +1,4 @@
-"""Free demo institute signup flow."""
+﻿"""Free demo institute signup flow."""
 from __future__ import annotations
 
 import datetime as dt
@@ -271,7 +271,7 @@ def _activate_demo_subscription(institute_id: str, plan_code: str = "demo") -> t
             "billing_cycle": plan_rows[0].get("billing_cycle") or "forever",
             "status": "active",
             "starts_at": now.isoformat(),
-            "ends_at": (now + dt.timedelta(days=14)).isoformat(),
+            "ends_at": (now + dt.timedelta(days=3650)).isoformat(),
         }
         db.table("subscriptions").insert(payload).execute()
         return True, ""
@@ -308,11 +308,15 @@ def _set_demo_session(
     st.session_state.selected_plan_code = plan_code
 
     # Session semantics for dashboard setup.
-    st.session_state.subscription_status = "active" if plan_code == "demo" else "trialing"
+    st.session_state.subscription_status = "demo" if plan_code == "demo" else "pending_payment"
 
     st.session_state.admin_onboarding_completed = True
-    st.session_state.page = "institute_dashboard"
-    st.session_state.institute_page = "institute_dashboard"
+    if plan_code == "demo":
+        st.session_state.page = "institute_dashboard"
+        st.session_state.institute_page = "institute_dashboard"
+    else:
+        st.session_state.page = "payment"
+        st.session_state.current_page = "payment"
 
 
 def show_demo_signup() -> None:
@@ -331,22 +335,22 @@ def show_demo_signup() -> None:
         selected_plan_code = selected_plan_code if selected_plan_code in {"demo", "starter", "pro", "enterprise"} else "demo"
 
         titles = {
-            "demo": "Start Your Free Demo",
-            "starter": "Start Your Starter Trial",
-            "pro": "Start Your Pro Trial",
-            "enterprise": "Contact Sales",
+            "demo": "Try Demo",
+            "starter": "Subscribe to Starter Plan",
+            "pro": "Subscribe to Pro Plan",
+            "enterprise": "Subscribe to Enterprise Plan",
         }
         subtitles = {
             "demo": "Create a demo institute account. No institute access code required.",
-            "starter": "Create your institute account and start your Starter trial.",
-            "pro": "Create your institute account and start your Pro trial.",
-            "enterprise": "Talk to our team for a custom enterprise setup.",
+            "starter": "Create your institute account and continue to payment.",
+            "pro": "Create your institute account and continue to payment.",
+            "enterprise": "Create your institute account and continue to payment.",
         }
         buttons = {
             "demo": "Create Demo Account",
-            "starter": "Start Starter Trial",
-            "pro": "Start Pro Trial",
-            "enterprise": "Contact Sales",
+            "starter": "Create Institute & Continue to Payment",
+            "pro": "Create Institute & Continue to Payment",
+            "enterprise": "Create Institute & Continue to Payment",
         }
 
         in_progress = bool(st.session_state.get("demo_signup_in_progress", False))
@@ -373,11 +377,13 @@ def show_demo_signup() -> None:
 
         if not submitted:
             st.markdown("---")
-            st.caption("Already received an institute access code? Continue here.")
-            if st.button("Join Institute", key="demo_join_institute", use_container_width=True):
-                st.session_state.return_to = "pricing"
-                st.session_state.page = "institute_join"
-                st.rerun()
+            st.caption("Already received an institute access code?")
+            join_left, join_mid, join_right = st.columns([1, 1.4, 1])
+            with join_mid:
+                if st.button("Join Institute with Code", key="demo_join_institute", use_container_width=True):
+                    st.session_state.return_to = "pricing"
+                    st.session_state.page = "institute_join"
+                    st.rerun()
             return
 
         errors = _validate_demo_form(
@@ -400,16 +406,7 @@ def show_demo_signup() -> None:
         st.session_state["signup_in_progress"] = True
         admin_email = admin_email.strip().lower()
 
-
-
-        # Ensure UI/session shows correct trial vs active semantics.
-        subscription_status = "active"
-        if selected_plan_code in {"starter", "pro"}:
-            subscription_status = "trialing"
-        elif selected_plan_code == "demo":
-            subscription_status = "active"
-        else:
-            subscription_status = "trialing"
+        subscription_status = "demo" if selected_plan_code == "demo" else "pending_payment"
 
         result = create_or_continue_admin_onboarding(
             email=admin_email,
@@ -435,9 +432,6 @@ def show_demo_signup() -> None:
             st.error(message)
             if result.get("rate_limited"):
                 _render_existing_account_actions()
-            if result.get("debug"):
-                with st.expander("Developer Debug", expanded=False):
-                    st.code(str(result.get("debug")))
             return
 
         st.session_state["signup_in_progress"] = False
@@ -449,7 +443,7 @@ def show_demo_signup() -> None:
             admin_name=result.get("name") or admin_name,
             admin_email=result.get("email") or admin_email,
             auth_user_id=str(result.get("auth_user_id") or ""),
-            plan_code=selected_plan_code if selected_plan_code in {"demo", "starter", "pro"} else "demo",
+            plan_code=selected_plan_code if selected_plan_code in {"demo", "starter", "pro", "enterprise"} else "demo",
         )
 
         st.session_state["selected_plan_code"] = selected_plan_code

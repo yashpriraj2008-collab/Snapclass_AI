@@ -58,6 +58,26 @@ def _first_user_profile(db, column: str, value: str):
     return rows[0] if rows else None
 
 
+def _clear_rejected_auth(db) -> None:
+    try:
+        db.auth.sign_out()
+    except Exception:
+        pass
+    for key in (
+        "user_id",
+        "auth_user_id",
+        "user_email",
+        "email",
+        "institute_id",
+        "role",
+        "user_name",
+        "founder_logged_in",
+        "logged_in",
+        "portal",
+    ):
+        st.session_state.pop(key, None)
+
+
 def _login_founder(email: str, password: str) -> tuple[bool, str]:
     email_norm = (email or "").strip().lower()
     password = (password or "")
@@ -77,6 +97,7 @@ def _login_founder(email: str, password: str) -> tuple[bool, str]:
     auth_user_id = getattr(user, "id", None) or getattr(user, "user_id", None)
     user_email = (getattr(user, "email", None) or email_norm).strip().lower()
     if not auth_user_id:
+        _clear_rejected_auth(db)
         return False, PROFILE_NOT_FOUND_MESSAGE
 
     profile = None
@@ -93,19 +114,24 @@ def _login_founder(email: str, password: str) -> tuple[bool, str]:
         profile = None
 
     if not profile:
+        _clear_rejected_auth(db)
         return False, PROFILE_NOT_FOUND_MESSAGE
 
     role = str(profile.get("role") or "").strip().lower()
     if role not in {"founder", "super_admin"}:
-        return False, "You do not have access to SnapClass HQ."
+        _clear_rejected_auth(db)
+        return False, "Founder role not assigned. Contact system owner."
 
     # Routing in app.py checks role == "founder".
+    # Keep the portal role unified, but do not change authorization logic.
     st.session_state.user_id = str(auth_user_id)
     st.session_state.auth_user_id = str(auth_user_id)
     st.session_state.user_email = user_email
     st.session_state.email = user_email
     st.session_state.institute_id = profile.get("institute_id")
-    st.session_state.role = "founder"
+    # Keep role marker so downstream routing can decide what to show.
+    st.session_state.role = "founder" if role == "founder" else "super_admin"
+
     st.session_state.user_name = profile.get("full_name") or "Founder"
     st.session_state.founder_logged_in = True
     st.session_state.logged_in = True
@@ -113,6 +139,7 @@ def _login_founder(email: str, password: str) -> tuple[bool, str]:
     st.session_state.founder_page = "founder_dashboard"
     st.session_state.page = "founder_dashboard"
     return True, ""
+
 
 
 def show_founder_auth():
@@ -156,10 +183,9 @@ def show_founder_auth():
         # Hide demo credentials on production.
         if demo_auth_enabled() and _is_local_env():
             st.caption(f"Local demo: {FOUNDER_EMAIL} / {FOUNDER_PASSWORD}")
-        elif demo_auth_enabled() and not _is_local_env():
-            st.caption("Founder access is restricted.")
         else:
-            st.caption("Use the founder email/password mapped in user_profiles.")
+            st.caption("Use your Supabase-auth mapped founder account.")
+
 
         if st.button("Access SnapClass HQ", type="primary", use_container_width=True, key="founder_go"):
             ok, message = _login_founder(email, pwd)
@@ -167,6 +193,6 @@ def show_founder_auth():
                 st.rerun()
             else:
                 st.error(message)
-                if message == EMAIL_NOT_CONFIRMED_MESSAGE:
+                if message == EMAIL_NOT_CONFIRMED_MESSAGE and _is_local_env():
                     with st.expander("Developer Debug", expanded=False):
                         st.info(LOCAL_EMAIL_CONFIRMATION_HINT)

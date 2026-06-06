@@ -1,39 +1,66 @@
 """Sidebars for all portals."""
 from __future__ import annotations
 
-import streamlit as st
+import html
+import streamlit as st  # type: ignore[import]
 
+from src.components.avatar import avatar_html
+from src.components.branding import render_sidebar_brand
+from src.database.client import get_supabase_client
+from src.services.admin_context import get_current_institute_id
+from src.services.institute_service import get_institute_by_id
+from src.services.profile_photo_service import fetch_user_profile
+from src.services.subscription_access import can_access_admin_portal, get_current_subscription
 from src.utils.session import logout, nav_founder, nav_institute, nav_student, nav_teacher
 
 
-def _brand(label: str = "SnapClass AI", icon: str = "S", gradient: str = "linear-gradient(135deg,#5B6CFF,#FF4FA3)") -> None:
-    st.markdown(
-        f"""
-        <div style="display:flex;align-items:center;gap:10px;padding:4px 0 20px;">
-          <div style="width:36px;height:36px;border-radius:11px;background:{gradient};
-            display:flex;align-items:center;justify-content:center;
-            color:white;font-weight:900;font-size:.95rem;flex-shrink:0;">{icon}</div>
-          <span style="font-weight:850;font-size:1.1rem;font-family:Poppins,sans-serif;">{label}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+def _brand() -> None:
+    render_sidebar_brand()
 
 
-def _user_chip(name: str, role_label: str, initial: str | None = None) -> None:
-    ini = (initial or name[:1] or "U").upper()
+def _sidebar_user(name: str, role: str, email: str = "") -> dict:
+    email_value = str(
+        email
+        or st.session_state.get("user_email")
+        or st.session_state.get("email")
+        or ""
+    ).strip().lower()
+    profile = {}
+    try:
+        profile = fetch_user_profile(get_supabase_client(), email_value)
+    except Exception:
+        profile = {}
+    session_user = st.session_state.get("user")
+    if not isinstance(session_user, dict):
+        session_user = {}
+    return {
+        **session_user,
+        **profile,
+        "name": profile.get("full_name") or profile.get("name") or name,
+        "full_name": profile.get("full_name") or profile.get("name") or name,
+        "email": profile.get("email") or email_value,
+        "role": profile.get("role") or role,
+        "profile_photo_url": (
+            profile.get("profile_photo_url")
+            or st.session_state.get("profile_photo_url")
+            or session_user.get("profile_photo_url")
+            or ""
+        ),
+    }
+
+
+def _user_chip(user: dict, role_label: str) -> None:
+    name = str(user.get("full_name") or user.get("name") or "User")
+    email = str(user.get("email") or "")
+    avatar_class = "sidebar-avatar" if user.get("profile_photo_url") else "sidebar-avatar sidebar-avatar-fallback"
     st.markdown(
         f"""
-        <div style="background:#F5F7FF;border-radius:12px;padding:10px 14px;
-          margin-bottom:18px;display:flex;align-items:center;gap:10px;">
-          <div style="width:36px;height:36px;border-radius:999px;
-            background:linear-gradient(135deg,#5B6CFF,#FF4FA3);color:white;
-            display:flex;align-items:center;justify-content:center;
-            font-weight:900;font-size:.9rem;flex-shrink:0;">{ini}</div>
-          <div style="overflow:hidden;">
-            <div style="font-weight:700;font-size:.88rem;white-space:nowrap;
-              overflow:hidden;text-overflow:ellipsis;">{name}</div>
-            <div style="color:#6B7280;font-size:.75rem;">{role_label}</div>
+        <div class="sidebar-user-card">
+          {avatar_html(user, size=48, border_color="#FFFFFF", css_class=avatar_class)}
+          <div class="sidebar-user-info">
+            <div class="sidebar-user-name">{html.escape(name)}</div>
+            <div class="sidebar-user-role">{html.escape(role_label)}</div>
+            <div class="sidebar-user-email">{html.escape(email)}</div>
           </div>
         </div>
         """,
@@ -43,12 +70,7 @@ def _user_chip(name: str, role_label: str, initial: str | None = None) -> None:
 
 def _section(title: str) -> None:
     st.markdown(
-        f"""
-        <div style="font-size:.7rem;font-weight:700;color:#9CA3AF;
-          text-transform:uppercase;letter-spacing:.08em;padding:4px 6px;margin:10px 0 4px;">
-          {title}
-        </div>
-        """,
+        f'<div class="sidebar-section-title">{html.escape(title)}</div>',
         unsafe_allow_html=True,
     )
 
@@ -61,7 +83,7 @@ def student_sidebar() -> None:
     with st.sidebar:
         _brand()
         name = (st.session_state.get("user_name", "") or "Student").replace(" Demo", "").strip() or "Student"
-        _user_chip(name, "Student")
+        _user_chip(_sidebar_user(name, "student"), "Student")
         _section("MAIN")
         if _nav_btn("Dashboard", "snav_dashboard"):
             nav_student("dashboard")
@@ -88,7 +110,7 @@ def teacher_sidebar() -> None:
     with st.sidebar:
         _brand()
         name = (st.session_state.get("user_name", "") or "Teacher").replace(" Demo", "").strip() or "Teacher"
-        _user_chip(name, "Teacher")
+        _user_chip(_sidebar_user(name, "teacher"), "Teacher")
         _section("MAIN")
         if _nav_btn("Dashboard", "tnav_dashboard"):
             nav_teacher("dashboard")
@@ -105,6 +127,9 @@ def teacher_sidebar() -> None:
             nav_teacher("analytics")
         if _nav_btn("Reports", "tnav_reports"):
             nav_teacher("reports")
+        _section("ACCOUNT")
+        if _nav_btn("Profile", "tnav_profile"):
+            nav_teacher("profile")
         st.divider()
         if _nav_btn("Logout", "teacher_logout"):
             logout()
@@ -115,7 +140,27 @@ def institute_sidebar() -> None:
         _brand()
         name = st.session_state.get("admin_name", "") or st.session_state.get("user_name", "Admin")
         inst_nm = st.session_state.get("active_institute_name", "My Institute")
-        _user_chip(name, inst_nm)
+        _user_chip(_sidebar_user(name, "institute_admin"), inst_nm)
+
+        institute_id = str(get_current_institute_id() or st.session_state.get("institute_id") or "")
+        institute = st.session_state.get("current_institute") or {}
+        if institute_id and (not institute or not institute.get("name")):
+            institute = get_institute_by_id(institute_id) or institute
+            if institute:
+                st.session_state.current_institute = institute
+        subscription = get_current_subscription(institute_id)
+        locked = bool(institute_id and not can_access_admin_portal(institute, subscription))
+
+        if locked:
+            _section("SUBSCRIPTION")
+            if _nav_btn("Billing / Pay Now", "inav_billing_pay"):
+                st.session_state.page = "payment"
+                st.rerun()
+            st.divider()
+            if _nav_btn("Logout", "inst_logout"):
+                logout()
+            return
+
         _section("MAIN")
         if _nav_btn("Dashboard", "inav_dash"):
             nav_institute("institute_dashboard")
@@ -144,8 +189,9 @@ def institute_sidebar() -> None:
 
 def founder_sidebar() -> None:
     with st.sidebar:
-        _brand("SnapClass HQ", "F", "linear-gradient(135deg,#06B6D4,#3B82F6)")
-        _user_chip("Founder", "Super Admin", "F")
+        _brand()
+        founder_name = st.session_state.get("user_name") or "Founder"
+        _user_chip(_sidebar_user(founder_name, "founder"), "Super Admin")
         _section("SNAPCLASS HQ")
         if _nav_btn("Dashboard", "fnav_dash"):
             nav_founder("founder_dashboard")
@@ -166,4 +212,3 @@ def founder_sidebar() -> None:
         st.divider()
         if _nav_btn("Logout", "founder_logout"):
             logout()
-

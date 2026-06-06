@@ -4,11 +4,13 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
+import streamlit as st
+
 from src.database.client import get_supabase_client
 
 VALID_STATUSES = {"present", "absent", "late"}
 VALID_MODES = {"manual", "faceid", "ai"}
-VALID_VERIFICATION_METHODS = {"manual", "faceid", "ai"}
+VALID_VERIFICATION_METHODS = {"manual", "faceid", "manual_faceid", "ai"}
 
 
 def _text(value: Any) -> str | None:
@@ -54,6 +56,76 @@ def _date_only(value: Any) -> str | None:
     return text
 
 
+def _unsupported_columns_from_error(error: Exception, payload: dict[str, Any]) -> list[str]:
+    raw = str(error).lower()
+    return [column for column in payload if column.lower() in raw and "column" in raw]
+
+
+def _insert_with_supported_columns(supabase, table: str, payload: dict[str, Any]) -> None:
+    try:
+        supabase.table(table).insert(payload).execute()
+        return
+    except Exception as exc:
+        unsupported = _unsupported_columns_from_error(exc, payload)
+        if not unsupported:
+            raise
+
+    retry = dict(payload)
+    for column in unsupported:
+        retry.pop(column, None)
+    supabase.table(table).insert(retry).execute()
+
+
+def _update_with_supported_columns(supabase, table: str, row_id: str, payload: dict[str, Any]) -> None:
+    try:
+        supabase.table(table).update(payload).eq("id", row_id).execute()
+        return
+    except Exception as exc:
+        unsupported = _unsupported_columns_from_error(exc, payload)
+        if not unsupported:
+            raise
+
+    retry = dict(payload)
+    for column in unsupported:
+        retry.pop(column, None)
+    supabase.table(table).update(retry).eq("id", row_id).execute()
+
+
+def _verification_badge_value(value: Any) -> str:
+    method = str(value or "manual").strip().lower()
+    if method in {"manual_faceid", "manual+faceid", "manual + faceid"}:
+        return "manual_faceid"
+    if method == "faceid":
+        return "faceid"
+    return "manual"
+
+
+def _faceid_verification_payload(confidence: Any = None) -> dict[str, Any]:
+    now = datetime.utcnow().isoformat()
+    payload: dict[str, Any] = {
+        "verification_method": "faceid",
+        "attendance_verification": "faceid",
+        "faceid_verified_at": now,
+        "marked_at": now,
+    }
+    if confidence is not None:
+        payload["confidence"] = confidence
+        payload["faceid_confidence"] = confidence
+        payload["verification_score"] = confidence
+    return payload
+
+
+def _session_query(supabase, *, class_id: str, subject_id: str, attendance_date: str, mode: str, date_column: str = "attendance_date"):
+    return (
+        supabase.table("attendance_sessions")
+        .select("*")
+        .eq("class_id", class_id)
+        .eq("subject_id", subject_id)
+        .eq(date_column, attendance_date)
+        .eq("mode", mode)
+    )
+
+
 def _get_or_create_session(
     supabase,
     *,
@@ -65,20 +137,33 @@ def _get_or_create_session(
     mode: str = "manual",
     created_by: str | None = None,
 ) -> dict[str, Any]:
-    query = (
-        supabase.table("attendance_sessions")
-        .select("*")
-        .eq("class_id", class_id)
-        .eq("subject_id", subject_id)
-        .eq("attendance_date", attendance_date)
-        .eq("mode", mode)
-    )
-    if teacher_id:
-        query = query.eq("teacher_id", teacher_id)
-    if institute_id:
-        query = query.eq("institute_id", institute_id)
-
-    existing = query.limit(1).execute()
+    try:
+        query = _session_query(
+            supabase,
+            class_id=class_id,
+            subject_id=subject_id,
+            attendance_date=attendance_date,
+            mode=mode,
+        )
+        if teacher_id:
+            query = query.eq("teacher_id", teacher_id)
+        if institute_id:
+            query = query.eq("institute_id", institute_id)
+        existing = query.limit(1).execute()
+    except Exception:
+        query = _session_query(
+            supabase,
+            class_id=class_id,
+            subject_id=subject_id,
+            attendance_date=attendance_date,
+            mode=mode,
+            date_column="date",
+        )
+        if teacher_id:
+            query = query.eq("teacher_id", teacher_id)
+        if institute_id:
+            query = query.eq("institute_id", institute_id)
+        existing = query.limit(1).execute()
     if existing.data:
         return existing.data[0]
 
@@ -86,6 +171,7 @@ def _get_or_create_session(
         "class_id": class_id,
         "subject_id": subject_id,
         "attendance_date": attendance_date,
+        "date": attendance_date,
         "mode": mode,
         "status": "completed",
     }
@@ -96,22 +182,36 @@ def _get_or_create_session(
     if created_by:
         payload["created_by"] = created_by
 
-    supabase.table("attendance_sessions").insert(payload).execute()
+    _insert_with_supported_columns(supabase, "attendance_sessions", payload)
 
-    created_query = (
-        supabase.table("attendance_sessions")
-        .select("*")
-        .eq("class_id", class_id)
-        .eq("subject_id", subject_id)
-        .eq("attendance_date", attendance_date)
-        .eq("mode", mode)
-    )
-    if teacher_id:
-        created_query = created_query.eq("teacher_id", teacher_id)
-    if institute_id:
-        created_query = created_query.eq("institute_id", institute_id)
+    try:
+        created_query = _session_query(
+            supabase,
+            class_id=class_id,
+            subject_id=subject_id,
+            attendance_date=attendance_date,
+            mode=mode,
+        )
+        if teacher_id:
+            created_query = created_query.eq("teacher_id", teacher_id)
+        if institute_id:
+            created_query = created_query.eq("institute_id", institute_id)
+        created = created_query.limit(1).execute()
+    except Exception:
+        created_query = _session_query(
+            supabase,
+            class_id=class_id,
+            subject_id=subject_id,
+            attendance_date=attendance_date,
+            mode=mode,
+            date_column="date",
+        )
+        if teacher_id:
+            created_query = created_query.eq("teacher_id", teacher_id)
+        if institute_id:
+            created_query = created_query.eq("institute_id", institute_id)
+        created = created_query.limit(1).execute()
 
-    created = created_query.limit(1).execute()
     if not created.data:
         raise RuntimeError("Could not create attendance session.")
     return created.data[0]
@@ -146,6 +246,67 @@ def create_or_get_attendance_session(
         return session, None
     except Exception as exc:
         return None, str(exc)
+
+
+def get_or_create_attendance_session(
+    supabase,
+    *,
+    class_id: str,
+    subject_id: str,
+    attendance_date: str,
+    teacher_id: str | None = None,
+    institute_id: str | None = None,
+    mode: str = "manual",
+) -> dict[str, Any] | None:
+    session, error = create_or_get_attendance_session(
+        supabase=supabase,
+        teacher_id=teacher_id,
+        class_id=class_id,
+        subject_id=subject_id,
+        attendance_date=attendance_date,
+        institute_id=institute_id,
+        mode=mode,
+    )
+    if error:
+        return None
+    return session
+
+
+def upsert_attendance_record(
+    supabase,
+    *,
+    session_id: str,
+    student_id: str,
+    status: str,
+    marked_by: str | None = None,
+    attendance_date: str | None = None,
+    class_id: str | None = None,
+    subject_id: str | None = None,
+    institute_id: str | None = None,
+    attendance_verification: str = "manual",
+    confidence: Any = None,
+) -> dict[str, Any]:
+    ok, message, saved_count, errors = _save_records_for_session(
+        supabase=supabase,
+        session_id=session_id,
+        records=[
+            {
+                "student_id": student_id,
+                "status": status,
+                "attendance_date": attendance_date,
+                "class_id": class_id,
+                "subject_id": subject_id,
+                "institute_id": institute_id,
+                "verification_method": attendance_verification,
+                "confidence": confidence,
+            }
+        ],
+        marked_by=marked_by,
+        attendance_date=attendance_date,
+        default_verification_method=attendance_verification,
+        default_confidence=confidence,
+    )
+    return {"ok": ok, "message": message, "saved_count": saved_count, "errors": errors}
 
 
 def _save_records_for_session(
@@ -189,11 +350,15 @@ def _save_records_for_session(
             "marked_by": _text(marked_by),
             "marked_at": datetime.utcnow().isoformat(),
             "verification_method": verification_method,
+            "attendance_verification": verification_method,
         }
         if row_date:
             payload["attendance_date"] = row_date
         if confidence is not None:
             payload["confidence"] = confidence
+        for optional_column in ("class_id", "subject_id", "institute_id"):
+            if (row or {}).get(optional_column):
+                payload[optional_column] = _text((row or {}).get(optional_column))
 
         try:
             existing = (
@@ -206,15 +371,17 @@ def _save_records_for_session(
             )
             if existing.data:
                 record_id = existing.data[0]["id"]
-                supabase.table("attendance_records").update(payload).eq("id", record_id).execute()
+                _update_with_supported_columns(supabase, "attendance_records", record_id, payload)
             else:
-                supabase.table("attendance_records").insert(payload).execute()
+                _insert_with_supported_columns(supabase, "attendance_records", payload)
             saved_count += 1
         except Exception as exc:
             errors.append(f"Failed for student {student_id}: {exc}")
 
     success = saved_count > 0
     message = f"Saved {saved_count} attendance records." if success else "No attendance records saved."
+    if success:
+        st.cache_data.clear()
     return success, message, saved_count, errors
 
 
@@ -247,6 +414,108 @@ def mark_manual_attendance(
         attendance_date=attendance_date,
         default_verification_method="manual",
     )
+
+
+def mark_faceid_attendance(
+    supabase,
+    *,
+    student_id: str,
+    class_id: str,
+    subject_id: str,
+    attendance_date: str,
+    teacher_id: str | None = None,
+    institute_id: str | None = None,
+    confidence: Any = None,
+) -> dict[str, Any]:
+    """Mark or verify FaceID attendance without duplicating session/student records."""
+    if not supabase:
+        return {"ok": False, "message": "Supabase client unavailable.", "error": "supabase_missing"}
+    if not all([student_id, class_id, subject_id, attendance_date]):
+        return {
+            "ok": False,
+            "message": "Student, class, subject, and date are required.",
+            "error": "missing_required_fields",
+        }
+
+    try:
+        session = _get_or_create_session(
+            supabase,
+            class_id=str(class_id),
+            subject_id=str(subject_id),
+            attendance_date=str(attendance_date),
+            teacher_id=_text(teacher_id),
+            institute_id=_text(institute_id),
+            mode="manual",
+            created_by=_text(teacher_id),
+        )
+        session_id = str(session.get("id") or "")
+        if not session_id:
+            return {"ok": False, "message": "Could not create attendance session.", "error": "session_missing"}
+
+        existing = (
+            supabase.table("attendance_records")
+            .select("*")
+            .eq("session_id", session_id)
+            .eq("student_id", str(student_id))
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+
+        if existing:
+            current = existing[0]
+            next_method = "faceid"
+            payload = _faceid_verification_payload(confidence)
+            payload.update(
+                {
+                    "status": "present",
+                    "verification_method": next_method,
+                    "attendance_verification": next_method,
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+            )
+            _update_with_supported_columns(supabase, "attendance_records", str(current["id"]), payload)
+            st.cache_data.clear()
+            return {
+                "ok": True,
+                "message": "FaceID verified successfully.",
+                "session_id": session_id,
+                "record_id": current.get("id"),
+                "verification_method": next_method,
+                "updated_existing": True,
+            }
+
+        payload = _faceid_verification_payload(confidence)
+        payload.update(
+            {
+                "session_id": session_id,
+                "student_id": str(student_id),
+                "status": "present",
+                "marked_by": _text(teacher_id),
+                "attendance_date": _date_only(attendance_date),
+                "class_id": str(class_id),
+                "subject_id": str(subject_id),
+                "institute_id": _text(institute_id),
+            }
+        )
+        _insert_with_supported_columns(supabase, "attendance_records", payload)
+        st.cache_data.clear()
+        return {
+            "ok": True,
+            "message": "FaceID attendance marked successfully.",
+            "session_id": session_id,
+            "verification_method": "faceid",
+            "updated_existing": False,
+        }
+    except Exception as exc:
+        raw = str(exc).lower()
+        message = (
+            "Database permission blocked FaceID update."
+            if "row-level security" in raw or "rls" in raw or "42501" in raw
+            else "Attendance could not be saved."
+        )
+        return {"ok": False, "message": message, "error": str(exc)}
 
 
 def save_attendance_records(*args, **kwargs):
@@ -405,6 +674,7 @@ def _save_attendance_records_legacy(records: list[dict[str, Any]]) -> dict[str, 
             saved_rows.extend(rows[:saved_count] if saved_count else rows)
             skipped += len(errors)
 
+        st.cache_data.clear()
         return {
             "success": True,
             "saved": len(saved_rows),
@@ -433,19 +703,26 @@ def _flatten_attendance_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
             or item.get("created_at")
         )
         if session:
-            item.setdefault("attendance_date", session_date)
-            item.setdefault("class_id", session.get("class_id"))
-            item.setdefault("subject_id", session.get("subject_id"))
-            item.setdefault("mode", session.get("mode"))
-            item.setdefault("teacher_id", session.get("teacher_id"))
-            item.setdefault("session_status", session.get("status"))
-            item.setdefault("created_by", session.get("created_by"))
+            session_values = {
+                "attendance_date": session_date,
+                "class_id": session.get("class_id"),
+                "subject_id": session.get("subject_id"),
+                "mode": session.get("mode"),
+                "teacher_id": session.get("teacher_id"),
+                "session_status": session.get("status"),
+                "created_by": session.get("created_by"),
+            }
+            for key, value in session_values.items():
+                if not item.get(key) and value is not None:
+                    item[key] = value
         if not item.get("attendance_date"):
             item["attendance_date"] = record_date or session_date
         if "status" in item and item["status"] is not None:
             item["status"] = str(item["status"]).lower()
         if "verification_method" in item and item["verification_method"] is not None:
             item["verification_method"] = str(item["verification_method"]).lower()
+        if "attendance_verification" in item and item["attendance_verification"] is not None:
+            item["attendance_verification"] = str(item["attendance_verification"]).lower()
         flattened.append(item)
     return flattened
 

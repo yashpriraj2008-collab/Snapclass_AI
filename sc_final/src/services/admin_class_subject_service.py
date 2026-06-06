@@ -3,6 +3,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+import streamlit as st
+
 from src.database.client import get_supabase_client
 
 
@@ -51,7 +53,17 @@ def _insert_with_supported_columns(table: str, payload: dict[str, Any]) -> tuple
     raw = error.lower()
     retry = dict(payload)
     changed = False
-    for column in ("teacher_id", "class_name", "section", "name", "status", "updated_at"):
+    for column in (
+        "teacher_id",
+        "class_name",
+        "section",
+        "name",
+        "subject_name",
+        "subject_code",
+        "code",
+        "status",
+        "updated_at",
+    ):
         if column in retry and column in raw:
             retry.pop(column, None)
             changed = True
@@ -161,6 +173,7 @@ def add_class(
     if not ok:
         return {"ok": False, "message": "Class could not be saved.", "debug": error}
     row = _first("classes", id=payload["id"]) or payload
+    st.cache_data.clear()
     return {"ok": True, "class": row}
 
 
@@ -202,6 +215,7 @@ def add_subject(
         "teacher_id": teacher_id or None,
         "name": subject_name,
         "subject_name": subject_name,
+        "code": subject_code,
         "subject_code": subject_code,
         "class_name": class_name,
         "section": section,
@@ -211,4 +225,5 @@ def add_subject(
     if not ok:
         return {"ok": False, "message": "Subject could not be saved.", "debug": error}
     row = _first("subjects", id=payload["id"]) or payload
+    st.cache_data.clear()
     return {"ok": True, "subject": row}

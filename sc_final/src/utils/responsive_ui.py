@@ -49,7 +49,6 @@ iframe {
   max-width: 100% !important;
 }
 
-button,
 .stButton > button {
   border-radius: 12px !important;
   min-height: 42px !important;
@@ -93,30 +92,6 @@ div[data-testid="stDataEditor"] [role="grid"] {
   min-width: max-content;
 }
 
-/* Fix Streamlit/BaseWeb selectbox visibility globally. */
-div[data-baseweb="select"] > div {
-  background-color: #ffffff !important;
-  color: #111827 !important;
-  border: 1px solid #d1d5db !important;
-  border-radius: 10px !important;
-  min-height: 44px !important;
-  opacity: 1 !important;
-}
-
-div[data-baseweb="select"] span,
-div[data-baseweb="select"] input,
-div[data-baseweb="select"] svg {
-  color: #111827 !important;
-  fill: #111827 !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-}
-
-[data-testid="stSelectbox"] label {
-  color: #111827 !important;
-  font-weight: 600 !important;
-}
-
 div[data-baseweb="popover"] {
   z-index: 999999 !important;
 }
@@ -145,10 +120,6 @@ div[role="option"]:hover,
 div[role="option"][aria-selected="true"] {
   background-color: #f3f4f6 !important;
   color: #111827 !important;
-}
-
-.stSelectbox * {
-  visibility: visible !important;
 }
 
 .stTabs [data-baseweb="tab-list"] {
@@ -378,6 +349,196 @@ div[role="option"][aria-selected="true"] {
   .snapbot-panel {
     height: min(68vh, 560px) !important;
   }
+}
+
+/*
+ * Authoritative global selectbox styling.
+ * Keep this at the end so legacy screen CSS cannot clip selected values.
+ */
+div[data-testid="stSelectbox"] {
+  min-width: 0 !important;
+}
+
+div[data-testid="stSelectbox"] label {
+  color: #334155 !important;
+  font-size: 0.86rem !important;
+  font-weight: 650 !important;
+  line-height: 1.35 !important;
+  margin-bottom: 6px !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+div[data-testid="stSelectbox"] label * {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] {
+  width: 100% !important;
+  height: 50px !important;
+  min-height: 50px !important;
+  overflow: visible !important;
+  background: #ffffff !important;
+  border: 1px solid #d8dee9 !important;
+  border-radius: 14px !important;
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.04) !important;
+  color: #0f172a !important;
+  opacity: 1 !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] * {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+  width: 100% !important;
+  height: 48px !important;
+  min-height: 48px !important;
+  display: flex !important;
+  align-items: center !important;
+  overflow: hidden !important;
+  padding: 0 6px 0 16px !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 13px !important;
+  box-shadow: none !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] > div > div {
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  display: flex !important;
+  align-items: center !important;
+  overflow: visible !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] > div > div:first-child {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  padding-right: 10px !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] > div > div:last-child {
+  flex: 0 0 38px !important;
+  width: 38px !important;
+  height: 48px !important;
+  min-height: 48px !important;
+  position: relative !important;
+  justify-content: center !important;
+  padding: 0 0 0 8px !important;
+  border-left: 0 !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] > div > div:last-child::before {
+  content: "" !important;
+  position: absolute !important;
+  top: 50% !important;
+  left: 0 !important;
+  width: 1px !important;
+  height: 20px !important;
+  background: #e2e8f0 !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  transform: translateY(-50%) !important;
+  pointer-events: none !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] span,
+div[data-testid="stSelectbox"] div[data-baseweb="select"] input,
+div[data-testid="stSelectbox"] div[data-baseweb="select"] [class*="singleValue"],
+div[data-testid="stSelectbox"] div[data-baseweb="select"] [class*="SingleValue"],
+div[data-testid="stSelectbox"] div[data-baseweb="select"] [class*="placeholder"],
+div[data-testid="stSelectbox"] div[data-baseweb="select"] [class*="Placeholder"] {
+  position: static !important;
+  transform: none !important;
+  width: auto !important;
+  max-width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  color: #0f172a !important;
+  -webkit-text-fill-color: #0f172a !important;
+  font-size: 1rem !important;
+  font-weight: 500 !important;
+  line-height: 1.4 !important;
+  white-space: nowrap !important;
+  text-overflow: ellipsis !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] input {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  flex: 0 1 1px !important;
+  width: 1px !important;
+  min-width: 1px !important;
+  height: 1px !important;
+  min-height: 1px !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  outline: 0 !important;
+  caret-color: #0f172a !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"] svg {
+  width: 20px !important;
+  height: 20px !important;
+  flex: 0 0 20px !important;
+  color: #334155 !important;
+  fill: #334155 !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"]:hover {
+  border-color: #a5b4fc !important;
+  box-shadow: 0 5px 14px rgba(79, 70, 229, 0.08) !important;
+}
+
+div[data-testid="stSelectbox"] div[data-baseweb="select"]:focus-within {
+  border-color: #6366f1 !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12) !important;
+}
+
+div[data-baseweb="popover"] ul[role="listbox"],
+div[data-baseweb="popover"] div[role="listbox"] {
+  padding: 6px !important;
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14) !important;
+}
+
+div[data-baseweb="popover"] li[role="option"],
+div[data-baseweb="popover"] div[role="option"] {
+  min-height: 40px !important;
+  display: flex !important;
+  align-items: center !important;
+  padding: 9px 12px !important;
+  border-radius: 8px !important;
+  color: #0f172a !important;
+  -webkit-text-fill-color: #0f172a !important;
+  line-height: 1.35 !important;
 }
 </style>
 """,

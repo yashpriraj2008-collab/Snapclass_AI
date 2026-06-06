@@ -20,11 +20,13 @@ __pycache__/
 # Virtual environments
 venv/
 .venv/
+.venv11/
 .venv311/
 env/
 ENV/
 **/venv/
 **/.venv/
+**/.venv11/
 **/.venv311/
 
 # Debug / temporary
@@ -50,10 +52,20 @@ Thumbs.db
 
 # Logs
 *.log
+*.out
 *.err
 *.err.log
+*.out.log
+streamlit-*.log
+streamlit-*.err.log
+streamlit-*.out.log
 streamlit_*.log
 streamlit_*.err.log
+
+# Local tools/cache
+.codex-run/
+**/.codex-run/
+.blackbox/
 
 # Large/generated files
 *.zip

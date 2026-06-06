@@ -1,10 +1,19 @@
 """Contact/lead capture helpers for the public Contact page and Founder HQ."""
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
+from postgrest.types import ReturnMethod
+
 from src.database.client import get_supabase_client, read_app_secrets
+
+try:
+    import streamlit as st  # used only for APP_ENV hiding of debug
+except Exception:  # pragma: no cover
+    st = None
+
 from src.services.email_service import send_contact_autoreply, send_contact_notification
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -26,6 +35,19 @@ STUDENT_COUNTS = [
 ]
 
 CONTACT_STATUSES = ["new", "contacted", "closed", "spam"]
+
+
+def _debug_enabled() -> bool:
+    try:
+        if st is not None and bool(st.session_state.get("debug_mode")):
+            return True
+    except Exception:
+        pass
+    try:
+        env = str(os.getenv("APP_ENV") or read_app_secrets().get("APP_ENV") or "production").strip().lower()
+    except Exception:
+        env = "production"
+    return env == "development"
 
 
 def _text(value: Any) -> str:
@@ -59,8 +81,10 @@ def validate_contact_payload(payload: dict[str, Any]) -> list[str]:
 
 def submit_contact_message(payload: dict[str, Any]) -> dict[str, Any]:
     """Validate, save, and optionally email a public contact message."""
-    normalized = {
-        "name": _text(payload.get("name")),
+
+    # Map UI payload into DB schema columns.
+    normalized: dict[str, Any] = {
+        "name": _text(payload.get("full_name") or payload.get("name")),
         "institute_name": _text(payload.get("institute_name")),
         "email": _text(payload.get("email")).lower(),
         "phone": _text(payload.get("phone")),
@@ -68,9 +92,21 @@ def submit_contact_message(payload: dict[str, Any]) -> dict[str, Any]:
         "student_count": _text(payload.get("student_count")),
         "subject": _text(payload.get("subject")),
         "message": _text(payload.get("message")),
-        "status": "new",
-        "source": "website",
+        "status": _text(payload.get("status")) or "new",
+        "source": _text(payload.get("source")) or "landing_contact_form",
     }
+
+    # Store extra metadata inside `message` because schema only has `message`.
+    extra_bits: list[str] = []
+    role = _text(payload.get("role"))
+    preferred_contact = _text(payload.get("preferred_contact"))
+    if role:
+        extra_bits.append(f"Role: {role}")
+    if preferred_contact:
+        extra_bits.append(f"Preferred contact: {preferred_contact}")
+
+    if extra_bits:
+        normalized["message"] = f"{normalized['message']}\n\n" + "\n".join(extra_bits)
 
     errors = validate_contact_payload({**normalized, "website": payload.get("website")})
     if errors:
@@ -85,14 +121,16 @@ def submit_contact_message(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
     try:
-        rows = db.table("contact_messages").insert(normalized).execute().data or []
-        row = rows[0] if rows else normalized
+        db.table("contact_messages").insert(normalized, returning=ReturnMethod.minimal).execute()
+        row = normalized
     except Exception as exc:
-        return {
+        result: dict[str, Any] = {
             "ok": False,
             "message": "Message could not be saved. Please email hello@snapclass.ai.",
-            "debug": str(exc),
         }
+        if _debug_enabled():
+            result["debug"] = str(exc)
+        return result
 
     notification = send_contact_notification(row)
     autoreply = send_contact_autoreply(row)
@@ -104,7 +142,6 @@ def submit_contact_message(payload: dict[str, Any]) -> dict[str, Any]:
         "email_notification": notification,
         "email_autoreply": autoreply,
     }
-
 
 def list_contact_messages() -> dict[str, Any]:
     db = get_supabase_client()

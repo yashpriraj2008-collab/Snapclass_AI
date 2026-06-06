@@ -1,0 +1,11 @@
+- [ ] Replace embedded Razorpay JS checkout with Razorpay Payment Link flow
+- [ ] Create Payment Link on Pay Now click and store payment_orders row (pending)
+- [ ] Show st.link_button("Open Razorpay Checkout", payment_link_url) only
+- [ ] Keep subscription locked until payment_success verification
+- [ ] Hide dev-only unlock button unless APP_ENV=development
+- [x] Payment Link-based flow implemented (replaced embedded Razorpay JS)
+- [x] Created Payment Link migration SQL
+- [ ] Ensure payment_success page only activates with Razorpay return parameters / signature verification
+- [ ] Remove duplicate Pay Now buttons (if any)
+- [ ] Run smoke test: create link → open browser checkout → verify redirect/params → subscription activates
+

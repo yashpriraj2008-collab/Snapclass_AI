@@ -1,15 +1,23 @@
 """My Institute — view/edit own institute profile only."""
 
+import html
 import streamlit as st
 
-from src.services.institute_service import init_institute_state, update_institute
+from src.services.admin_context import get_current_institute_id
+from src.services.institute_service import _db, get_institute_by_id, init_institute_state, update_institute
+from src.services.profile_photo_service import upload_institute_logo, validate_profile_photo
 
 
 def show_my_institute() -> None:
     init_institute_state()
 
     inst = st.session_state.get("current_institute") or {}
-    inst_id = st.session_state.get("active_institute_id", "")
+    inst_id = get_current_institute_id()
+    if inst_id and (not inst or not inst.get("name")):
+        loaded = get_institute_by_id(inst_id)
+        if loaded:
+            inst = loaded
+            st.session_state["current_institute"] = loaded
 
     st.markdown("### 🏫 My Institute")
     st.caption("View and edit your institute profile. You can only manage your own institute.")
@@ -21,7 +29,91 @@ def show_my_institute() -> None:
             st.rerun()
         return
 
-    edit = st.toggle("✏️ Edit Mode", key="inst_edit_toggle")
+    if not inst:
+        st.info("Institute profile not found. Please create or complete your institute profile first.")
+        return
+
+    st.markdown(
+        """
+        <style>
+        .institute-logo-preview {
+            width: 100%;
+            min-height: 170px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+            border: 1px solid #E5E7EB;
+            border-radius: 18px;
+            background: #FFFFFF;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+        }
+        .institute-logo-preview img,
+        .institute-logo-fallback {
+            width: 120px;
+            height: 120px;
+            border-radius: 24px;
+        }
+        .institute-logo-preview img {
+            display: block;
+            object-fit: contain;
+        }
+        .institute-logo-fallback {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #4F46E5, #06B6D4);
+            color: #FFFFFF;
+            font-size: 38px;
+            font-weight: 900;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    edit = st.toggle(":material/edit: Edit Mode", key="inst_edit_toggle")
+
+    st.markdown("#### Institute Logo")
+    logo_col, upload_col = st.columns([0.35, 1], gap="large")
+    with logo_col:
+        if inst.get("logo_url"):
+            logo_url = html.escape(str(inst.get("logo_url")), quote=True)
+            logo_markup = f'<img src="{logo_url}" alt="Institute logo">'
+        else:
+            initial = html.escape(str(inst.get("name") or "I")[:1].upper())
+            logo_markup = f'<div class="institute-logo-fallback">{initial}</div>'
+        st.markdown(
+            f'<div class="institute-logo-preview">{logo_markup}</div>',
+            unsafe_allow_html=True,
+        )
+    with upload_col:
+        st.caption("Upload a JPG or PNG logo up to 2 MB.")
+        logo_file = st.file_uploader(
+            "Upload institute logo",
+            type=["png", "jpg", "jpeg"],
+            key="institute_logo_upload",
+        )
+        if st.button("Update Institute Logo", type="primary", key="institute_logo_update"):
+            valid, message = validate_profile_photo(logo_file)
+            if not valid:
+                st.warning(message)
+            else:
+                try:
+                    db = _db()
+                    logo_url = upload_institute_logo(db, logo_file, str(inst_id))
+                    if not logo_url:
+                        raise RuntimeError("No public logo URL returned.")
+                    db.table("institutes").update({"logo_url": logo_url}).eq("id", inst_id).execute()
+                    inst = {**inst, "logo_url": logo_url}
+                    st.session_state["current_institute"] = inst
+                    st.success("Institute logo updated.")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception:
+                    st.error(
+                        "Logo upload failed. Confirm the profile-photos bucket and database migration are configured."
+                    )
 
     if not edit:
         rows = [
@@ -39,18 +131,24 @@ def show_my_institute() -> None:
             ("Status", inst.get("status", "active")),
         ]
 
-        st.markdown('<div class="sc-card">', unsafe_allow_html=True)
-        for label, val in rows:
+        if any(str(val or "").strip() not in {"", "-", "â€”"} for _, val in rows):
+            row_markup = "".join(
+                (
+                    '<div style="display:flex;justify-content:space-between;gap:24px;'
+                    'padding:10px 0;border-bottom:1px solid #F3F4F6;">'
+                    f'<span style="color:#6B7280;font-size:.88rem;">{html.escape(label)}</span>'
+                    f'<strong style="font-size:.9rem;text-align:right;">'
+                    f'{html.escape(str(val if val is not None else "—"))}</strong>'
+                    "</div>"
+                )
+                for label, val in rows
+            )
             st.markdown(
-                f"""
-                <div style="display:flex;justify-content:space-between;padding:10px 0;
-                        border-bottom:1px solid #F3F4F6;">
-                  <span style="color:#6B7280;font-size:.88rem;">{label}</span>
-                  <strong style="font-size:.9rem;">{val}</strong>
-                </div>""",
+                f'<div class="sc-card">{row_markup}</div>',
                 unsafe_allow_html=True,
             )
-        st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.info("Institute profile not found. Please switch to Edit Mode and complete the profile.")
     else:
         with st.form("edit_inst_form"):
             c1, c2 = st.columns(2)
@@ -96,7 +194,7 @@ def show_my_institute() -> None:
                 }
 
                 inst_id = (
-                    st.session_state.get("active_institute_id")
+                    get_current_institute_id()
                     or (st.session_state.get("current_institute") or {}).get("id")
                     or ""
                 )
@@ -116,4 +214,3 @@ def show_my_institute() -> None:
                         )
                 else:
                     st.error(result["message"])
-

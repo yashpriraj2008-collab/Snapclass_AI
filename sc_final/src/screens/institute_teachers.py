@@ -9,11 +9,13 @@ from typing import Any
 import streamlit as st
 import streamlit.components.v1 as components
 
+from src.components.avatar import avatar_html
 from src.components.form_controls import (
     format_class_option,
     format_subject_option,
     safe_selectbox,
 )
+from src.components.user_identity import password_status_label, render_password_reset, role_badge
 from src.services.admin_context import get_current_institute_id
 from src.services.admin_teacher_service import (
     add_teacher,
@@ -25,6 +27,8 @@ from src.services.admin_teacher_service import (
     list_teachers,
 )
 from src.services.institute_service import _db, init_institute_state
+from src.services.profile_photo_service import profile_photos_by_email
+from src.utils.perf import perf_enabled
 
 
 def _copy_tools(code: str, message: str) -> None:
@@ -49,6 +53,13 @@ def _copy_tools(code: str, message: str) -> None:
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _show_debug(data: Any) -> None:
+    if not perf_enabled():
+        return
+    with st.expander("Developer Debug", expanded=False):
+        st.code(str(data))
 
 
 def _teacher_label(teacher: dict[str, Any]) -> str:
@@ -165,8 +176,7 @@ def _render_add_teacher(inst_id: str) -> None:
         else:
             st.error(result.get("message") or "Teacher could not be saved.")
             if result.get("debug"):
-                with st.expander("Developer Debug", expanded=False):
-                    st.code(str(result.get("debug")))
+                _show_debug(result.get("debug"))
         return
 
     if not _text(t_name) or "@" not in _text(t_email):
@@ -275,8 +285,7 @@ def _render_assign_teacher(inst_id: str, teachers: list[dict[str, Any]], classes
         else:
             st.error(result.get("message") or "Teacher assignment could not be saved.")
             if result.get("debug"):
-                with st.expander("Developer Debug", expanded=False):
-                    st.code(str(result.get("debug")))
+                _show_debug(result.get("debug"))
         return
 
     if not all([teacher_id, class_id, subject_id]):
@@ -331,40 +340,77 @@ def _render_teachers_list(
             or needle in _text(teacher.get("email")).lower()
         ]
 
-    rows = []
+    assignments = list_teacher_assignments(inst_id) if _db() and inst_id else st.session_state.get("teacher_assignments", [])
+    photo_by_email = profile_photos_by_email(
+        _db(),
+        [_text(teacher.get("email")) for teacher in teachers],
+    )
+    assignments_by_teacher: dict[str, list[dict[str, Any]]] = {}
+    for assignment in assignments:
+        if _text(assignment.get("institute_id")) != _text(inst_id):
+            continue
+        assignments_by_teacher.setdefault(_text(assignment.get("teacher_id")), []).append(assignment)
+
     for teacher in teachers:
         teacher_id = _text(teacher.get("id"))
-        rows.append(
+        teacher_assignments = assignments_by_teacher.get(teacher_id, [])
+        class_labels = sorted({
+            format_class_option(row.get("classes"))
+            for row in teacher_assignments
+            if isinstance(row.get("classes"), dict)
+        })
+        subject_labels = sorted({
+            format_subject_option(row.get("subjects"))
+            for row in teacher_assignments
+            if isinstance(row.get("subjects"), dict)
+        })
+        name = html.escape(_text(teacher.get("name")) or "Unknown")
+        email = html.escape(_text(teacher.get("email")) or "No email")
+        status = html.escape(_status_label(teacher.get("profile_status") or teacher.get("status") or teacher.get("invite_status")))
+        teacher_code = html.escape(_text(teacher.get("teacher_code") or teacher.get("invite_code")) or "-")
+        classes_text = html.escape(", ".join(class_labels) or "Not assigned")
+        subjects_text = html.escape(", ".join(subject_labels) or "Not assigned")
+        password_status = password_status_label(teacher)
+        photo_url = (
+            _text(teacher.get("profile_photo_url"))
+            or photo_by_email.get(_text(teacher.get("email")).lower(), "")
+        )
+        teacher_avatar = avatar_html(
             {
-                "Name": _text(teacher.get("name")) or "-",
-                "Email": _text(teacher.get("email")) or "-",
-                "Phone": _text(teacher.get("phone")) or "-",
-                "Teacher Code": _text(teacher.get("teacher_code")) or "-",
-                "Invite Code": _text(teacher.get("invite_code")) or "-",
-                "Status": _status_label(teacher.get("status") or teacher.get("invite_status")),
-                "Assigned Classes": assignment_count_by_teacher.get(teacher_id, 0),
-                "Created": _text(teacher.get("created_at"))[:10] or "-",
-            }
+                "name": _text(teacher.get("name")) or "Teacher",
+                "profile_photo_url": photo_url,
+            },
+            size=52,
         )
 
-    st.dataframe(rows, use_container_width=True, hide_index=True)
-
-    assignments = list_teacher_assignments(inst_id) if _db() and inst_id else st.session_state.get("teacher_assignments", [])
-    visible_assignments = [
-        row for row in assignments if _text(row.get("institute_id")) == _text(inst_id)
-    ]
-    if visible_assignments:
-        with st.expander("Current Assignments", expanded=False):
-            for row in visible_assignments:
-                teacher = row.get("teachers") if isinstance(row.get("teachers"), dict) else {}
-                class_row = row.get("classes") if isinstance(row.get("classes"), dict) else {}
-                subject = row.get("subjects") if isinstance(row.get("subjects"), dict) else {}
-                st.write(
-                    f"{_teacher_label(teacher) if teacher else row.get('teacher_id')} | "
-                    f"{format_class_option(class_row) if class_row else row.get('class_id')} | "
-                    f"{format_subject_option(subject) if subject else row.get('subject_id')} | "
-                    f"{row.get('assignment_type') or 'subject_teacher'}"
-                )
+        with st.container(border=True):
+            st.markdown(
+                f"""
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+                  <div style="display:flex;gap:12px;align-items:center;">
+                    {teacher_avatar}
+                    <div>
+                      <h3 style="margin:0 0 6px;">{name}</h3>
+                      <div style="color:#6B7280;">Email: {email}</div>
+                    </div>
+                  </div>
+                  {role_badge("teacher")}
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 20px;margin-top:14px;">
+                  <div><b>Status:</b> {status}</div>
+                  <div><b>Teacher Code:</b> {teacher_code}</div>
+                  <div><b>Assigned Class:</b> {classes_text}</div>
+                  <div><b>Assigned Subject:</b> {subjects_text}</div>
+                  <div><b>Password:</b> {password_status}</div>
+                  <div><b>Assignments:</b> {assignment_count_by_teacher.get(teacher_id, 0)}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            render_password_reset(
+                _text(teacher.get("email")),
+                key=f"reset_teacher_password_{teacher_id}",
+            )
 
 
 def show_teachers() -> None:

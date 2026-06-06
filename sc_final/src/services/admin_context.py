@@ -117,12 +117,12 @@ def get_current_institute_id() -> str:
     user_profiles row.
     """
     candidates = _candidate_session_ids()
-    if len(candidates) == 1:
-        return _remember_institute_id(candidates[0])
-
     profile_institute_id = _fetch_profile_institute_id()
     if profile_institute_id:
         return _remember_institute_id(profile_institute_id)
+
+    if len(candidates) == 1:
+        return _remember_institute_id(candidates[0])
 
     if candidates:
         return _remember_institute_id(candidates[0])

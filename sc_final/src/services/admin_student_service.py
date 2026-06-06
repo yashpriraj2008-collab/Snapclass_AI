@@ -6,10 +6,23 @@ import string
 import uuid
 from typing import Any
 
+import streamlit as st
+
 from src.database.client import get_supabase_client
 from src.services.auth_service import ensure_user_profile_for_existing_auth_user
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+REQUIRED_STUDENT_COLUMNS = {
+    "institute_id",
+    "class_id",
+    "class_name",
+    "section",
+    "roll_no",
+    "name",
+    "email",
+    "phone",
+    "status",
+}
 STUDENT_PROFILE_MAPPING_ERROR = (
     "Student saved, but login profile could not be created. "
     "Check user_profiles RLS/schema."
@@ -88,7 +101,7 @@ def _insert_student_with_supported_columns(payload: dict[str, Any]) -> tuple[boo
     raw = error.lower()
     retry = dict(payload)
     changed = False
-    for column in ("class_name", "section", "student_code", "invite_status", "phone", "parent_name", "parent_phone", "status"):
+    for column in ("student_code", "invite_status", "parent_name", "parent_phone"):
         if column in retry and column in raw:
             retry.pop(column, None)
             changed = True
@@ -96,6 +109,41 @@ def _insert_student_with_supported_columns(payload: dict[str, Any]) -> tuple[boo
     if not changed:
         return False, error
     return _safe_insert("students", retry)
+
+
+def _student_payload(
+    *,
+    student_id: str,
+    institute_id: str,
+    class_record: dict[str, Any],
+    roll_no: str,
+    name: str,
+    email: str,
+    phone: str,
+    parent_name: str,
+    parent_phone: str,
+    student_code: str,
+) -> dict[str, Any]:
+    return {
+        "id": student_id,
+        "institute_id": institute_id,
+        "class_id": _text(class_record.get("id")),
+        "class_name": _text(class_record.get("class_name") or class_record.get("name")),
+        "section": _text(class_record.get("section")),
+        "roll_no": roll_no,
+        "name": name,
+        "email": email,
+        "phone": _text(phone),
+        "status": "active",
+        "parent_name": _text(parent_name),
+        "parent_phone": _text(parent_phone),
+        "student_code": student_code,
+        "invite_status": "pending",
+    }
+
+
+def _required_student_fields_match(student: dict[str, Any], payload: dict[str, Any]) -> bool:
+    return all(_text(student.get(column)) == _text(payload.get(column)) for column in REQUIRED_STUDENT_COLUMNS)
 
 
 def ensure_student_profile(
@@ -154,27 +202,33 @@ def add_student(
         return {"ok": False, "message": "This roll number already exists in the selected class.", "student": existing_roll}
 
     code = _student_code()
-    payload = {
-        "id": str(uuid.uuid4()),
-        "institute_id": institute_id,
-        "class_id": class_id,
-        "class_name": class_name,
-        "section": section,
-        "name": name,
-        "email": email_norm,
-        "roll_no": roll_no,
-        "phone": _text(phone),
-        "parent_name": _text(parent_name),
-        "parent_phone": _text(parent_phone),
-        "student_code": code,
-        "invite_status": "pending",
-        "status": "active",
-    }
+    payload = _student_payload(
+        student_id=str(uuid.uuid4()),
+        institute_id=institute_id,
+        class_record=class_record,
+        roll_no=roll_no,
+        name=name,
+        email=email_norm,
+        phone=phone,
+        parent_name=parent_name,
+        parent_phone=parent_phone,
+        student_code=code,
+    )
     ok, error = _insert_student_with_supported_columns(payload)
     if not ok:
         return {"ok": False, "message": "Student could not be saved.", "debug": error}
 
     student = _first("students", id=payload["id"]) or payload
+    if not _required_student_fields_match(student, payload):
+        return {
+            "ok": False,
+            "message": "Student record is incomplete. Class mapping was not saved.",
+            "student": student,
+            "debug": {
+                "required_fields": sorted(REQUIRED_STUDENT_COLUMNS),
+                "saved_student": student,
+            },
+        }
     profile = ensure_student_profile(
         institute_id=institute_id,
         name=name,
@@ -184,6 +238,7 @@ def add_student(
     )
     if not profile.get("ok"):
         if profile.get("pending_auth"):
+            st.cache_data.clear()
             return {
                 "ok": True,
                 "student": student,
@@ -201,6 +256,7 @@ def add_student(
             "debug": profile.get("debug"),
         }
 
+    st.cache_data.clear()
     return {"ok": True, "student": student, "profile": profile.get("profile"), "student_code": code}
 
 
@@ -227,7 +283,7 @@ def list_students(institute_id: str) -> list[dict[str, Any]]:
     if not db or not institute_id:
         return []
     try:
-        return (
+        students = (
             db.table("students")
             .select("*")
             .eq("institute_id", institute_id)
@@ -236,5 +292,23 @@ def list_students(institute_id: str) -> list[dict[str, Any]]:
             .data
             or []
         )
+        try:
+            profiles = (
+                db.table("user_profiles")
+                .select("user_id,email,role,status")
+                .eq("institute_id", institute_id)
+                .execute()
+                .data
+                or []
+            )
+        except Exception:
+            profiles = []
+        profiles_by_email = {_email(row.get("email")): row for row in profiles if row.get("email")}
+        for student in students:
+            profile = profiles_by_email.get(_email(student.get("email"))) or {}
+            student["role"] = "student"
+            student["profile_status"] = profile.get("status")
+            student["user_id"] = student.get("user_id") or profile.get("user_id")
+        return students
     except Exception:
         return []

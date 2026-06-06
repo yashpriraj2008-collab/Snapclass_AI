@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from src.services.admin_context import get_current_institute_id
 from src.services.institute_service import init_institute_state, _db
 
 
@@ -18,9 +19,9 @@ def show_analytics():
     init_institute_state()
     st.markdown("### 📊 Analytics")
 
-    inst_id = st.session_state.get("active_institute_id", "")
+    inst_id = get_current_institute_id()
     if not inst_id:
-        st.warning("Please log in again with your access code.")
+        st.warning("Please log in again with your institute admin account.")
         return
 
     db = _db_safe()
@@ -44,11 +45,29 @@ def show_analytics():
             db.table("subjects").select("id").eq("institute_id", inst_id).execute().data or []
         )
 
-        # Attendance aggregation (attendance.status is expected: 'present'/'absent')
-        att = db.table("attendance").select("status").execute().data or []
+        sessions = (
+            db.table("attendance_sessions")
+            .select("id")
+            .eq("institute_id", inst_id)
+            .execute()
+            .data
+            or []
+        )
+        session_ids = [row.get("id") for row in sessions if row.get("id")]
+        if session_ids:
+            att = (
+                db.table("attendance_records")
+                .select("student_id,status")
+                .in_("session_id", session_ids)
+                .execute()
+                .data
+                or []
+            )
+        else:
+            att = []
         total = len(att)
-        present = sum(1 for r in att if str(r.get("status")).lower() == "present")
-        absent = total - present
+        present = sum(1 for r in att if str(r.get("status")).lower() in {"present", "late"})
+        absent = sum(1 for r in att if str(r.get("status")).lower() == "absent")
 
         threshold = st.session_state.get("attendance_threshold") or (
             db.table("institutes")
@@ -60,8 +79,8 @@ def show_analytics():
             or [{}]
         )[0].get("attendance_threshold", 75)
 
-        # Compute per-student pct
-        att2 = db.table("attendance").select("student_id,status").execute().data or []
+        # Compute per-student pct.
+        att2 = att
         by_sid = {}
         for r in att2:
             sid = r.get("student_id")
@@ -74,7 +93,7 @@ def show_analytics():
             t = len(statuses)
             if t == 0:
                 continue
-            p = sum(1 for s in statuses if s == "present")
+            p = sum(1 for s in statuses if s in {"present", "late"})
             pct = (p / t) * 100
             if pct < float(threshold):
                 low_attendance_count += 1
@@ -113,4 +132,3 @@ def show_analytics():
 
     except Exception:
         st.info("No analytics data yet. Add students and mark attendance first.")
-

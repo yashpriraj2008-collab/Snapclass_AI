@@ -1,9 +1,12 @@
 """SnapClass HQ institutes management page."""
 from __future__ import annotations
 
+import html
 import streamlit as st
 
+from src.components.avatar import avatar_html
 from src.components.form_controls import format_institute_option, safe_selectbox
+from src.database.client import get_supabase_client
 from src.services.institute_service import (
     activate_institute,
     count_codes,
@@ -15,6 +18,32 @@ from src.services.institute_service import (
     list_institutes,
 )
 from src.utils.session import nav_founder
+
+
+def _rows(table: str) -> list[dict]:
+    db = get_supabase_client()
+    if not db:
+        return []
+    try:
+        return db.table(table).select("*").execute().data or []
+    except Exception:
+        return []
+
+
+def _institute_identity_data() -> tuple[dict[str, dict], dict[str, dict]]:
+    admins: dict[str, dict] = {}
+    for profile in _rows("user_profiles"):
+        role = str(profile.get("role") or "").strip().lower()
+        institute_id = str(profile.get("institute_id") or "")
+        if role in {"admin", "institute_admin"} and institute_id:
+            admins.setdefault(institute_id, profile)
+
+    subscriptions: dict[str, dict] = {}
+    for subscription in _rows("subscriptions"):
+        institute_id = str(subscription.get("institute_id") or "")
+        if institute_id:
+            subscriptions[institute_id] = subscription
+    return admins, subscriptions
 
 
 def render_founder_institutes() -> None:
@@ -180,20 +209,45 @@ def render_founder_institutes() -> None:
         st.info("No institutes found.")
         return
 
+    admins, subscriptions = _institute_identity_data()
     for institute in institutes:
+        institute_id = str(institute.get("id") or "")
+        admin = admins.get(institute_id) or {}
+        subscription = subscriptions.get(institute_id) or {}
         status = institute.get("status", "active")
         with st.container(border=True):
             left, right = st.columns([4, 1])
             with left:
-                st.markdown(f"#### {institute.get('name', 'Unnamed Institute')}")
+                institute_logo = str(institute.get("logo_url") or "")
+                admin_name = admin.get("full_name") or institute.get("admin_name") or "Institute Admin"
+                identity_image = avatar_html(
+                    {
+                        "name": institute.get("name") or admin_name,
+                        "profile_photo_url": institute_logo or admin.get("profile_photo_url") or "",
+                    },
+                    size=54,
+                )
+                st.markdown(
+                    f"""
+                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+                      {identity_image}
+                      <div>
+                        <h4 style="margin:0;">{html.escape(str(institute.get('name') or 'Unnamed Institute'))}</h4>
+                        <div style="color:#6B7280;font-size:.85rem;">{html.escape(str(admin_name))}</div>
+                      </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
                 st.write(f"{institute.get('city', '')} {institute.get('state', '')}".strip())
                 st.write(
-                    f"Admin: {institute.get('admin_name') or '-'} "
-                    f"({institute.get('admin_email') or '-'})"
+                    f"Admin: {admin.get('full_name') or institute.get('admin_name') or '-'} "
+                    f"({admin.get('email') or institute.get('admin_email') or '-'})"
                 )
                 st.write(
                     f"Plan: {institute.get('plan', 'Demo')} | "
-                    f"Type: {institute.get('institute_type', 'School')}"
+                    f"Payment: {str(subscription.get('status') or institute.get('subscription_status') or 'pending').replace('_', ' ').title()} | "
+                    f"Status: {str(status).replace('_', ' ').title()}"
                 )
             with right:
                 if status == "active":

@@ -16,38 +16,46 @@ import tempfile
 from datetime import datetime
 from typing import Any, Optional
 
+import streamlit as st
+
+from src.utils.perf import time_block
+
 
 # ----------------------------- availability -----------------------------
 
-try:
-    from deepface import DeepFace
-    DEEPFACE_AVAILABLE = True
-    DEEPFACE_ERROR = None
-except Exception as e:
-    DeepFace = None
-    DEEPFACE_AVAILABLE = False
-    DEEPFACE_ERROR = repr(e)
+DEEPFACE_ERROR: str | None = None
+
+
+@st.cache_resource(show_spinner=False)
+def load_face_model():
+    """Load DeepFace only when a FaceID/AI attendance flow needs it."""
+    global DEEPFACE_ERROR
+    with time_block("FaceID imports"):
+        try:
+            from deepface import DeepFace
+            import cv2  # noqa: F401
+
+            DEEPFACE_ERROR = None
+            return DeepFace
+        except Exception as e:
+            DEEPFACE_ERROR = repr(e)
+            return None
 
 
 def is_deepface_available() -> bool:
     """Return True if DeepFace and cv2 can be imported successfully."""
-    try:
-        return DEEPFACE_AVAILABLE and importlib.import_module("cv2") is not None
-    except Exception:
-        return False
+    return load_face_model() is not None
 
 
 def deepface_error_message() -> Optional[str]:
     """Return a user-safe DeepFace availability message."""
-    if DEEPFACE_AVAILABLE:
+    if load_face_model() is not None:
         return None
     return "FaceID AI engine is unavailable in this beta environment."
 
 
 def _get_deepface():
-    if not is_deepface_available():
-        return None
-    return DeepFace
+    return load_face_model()
 
 
 def image_bytes_to_temp_file(image_bytes: bytes) -> str:
@@ -353,6 +361,7 @@ def save_face_embedding_to_supabase(
         if not enrolled:
             raise RuntimeError("Face embedding saved, but verification re-query failed.")
 
+        st.cache_data.clear()
         return row
     except Exception as e:
         try:
@@ -373,6 +382,7 @@ def save_face_embedding_to_supabase(
                 supabase.table("face_embeddings").insert(compat_payload).execute()
             enrolled, row = check_face_enrolled(supabase, student_identity)
             if enrolled:
+                st.cache_data.clear()
                 return row
         except Exception:
             pass
@@ -524,6 +534,7 @@ def save_attendance_to_supabase(
             payload["marked_by"] = marked_by
 
         db.table("attendance").insert(payload).execute()
+        st.cache_data.clear()
         return {"ok": True, "error": None}
     except Exception as e:
         return {"ok": False, "error": str(e)}

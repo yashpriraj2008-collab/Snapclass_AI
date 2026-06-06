@@ -80,47 +80,176 @@ def activate_subscription(
     billing_cycle: str,
     razorpay_order_id: str,
     razorpay_payment_id: str,
+    plan_name: str = "",
+    payment_link_id: str = "",
 ) -> bool:
-    """Activate subscription for an institute.
-
-    - monthly: ends_at = now()+30 days
-    - yearly: ends_at = now()+365 days
-    - forever: ends_at = now()+100 years (approx)
-    """
+    """Activate a verified paid subscription and keep all access flags aligned."""
     db = get_supabase_client()
-    if db is None:
+    institute_id = str(institute_id or "").strip()
+    plan_id = str(plan_id or "").strip()
+    if db is None or not institute_id or not plan_id:
         return False
 
     starts_at = _now()
+    ends_at = starts_at + _dt.timedelta(days=30)
     cycle = str(billing_cycle or "monthly").strip().lower()
-
-    # Phase 5 spec: successful Razorpay test payment activates monthly subscription.
-    if cycle == "monthly":
-        ends_at = starts_at + _dt.timedelta(days=30)
-    elif cycle == "yearly":
-        ends_at = starts_at + _dt.timedelta(days=365)
-    else:
-        ends_at = starts_at + _dt.timedelta(days=365 * 100)
+    selected_plan = str(plan_name or "").strip()
+    if not selected_plan:
+        try:
+            rows = db.table("plans").select("*").eq("id", plan_id).limit(1).execute().data or []
+            plan = rows[0] if rows else {}
+            selected_plan = str(
+                plan.get("display_name")
+                or plan.get("name")
+                or plan.get("plan_code")
+                or ""
+            ).strip()
+        except Exception:
+            selected_plan = ""
+    if not selected_plan:
+        return False
 
     try:
-        # Upsert by institute_id
         payload = {
             "institute_id": institute_id,
             "plan_id": plan_id,
+            "plan_name": selected_plan,
             "billing_cycle": cycle,
-            "status": "active",
+            "status": "pending_payment",
+            "payment_status": "paid",
             "starts_at": starts_at.isoformat(),
             "ends_at": ends_at.isoformat(),
+            "current_period_start": starts_at.isoformat(),
+            "current_period_end": ends_at.isoformat(),
             "razorpay_order_id": razorpay_order_id,
             "razorpay_payment_id": razorpay_payment_id,
+            "updated_at": starts_at.isoformat(),
         }
 
-        # We don't know PK/upsert constraints; use manual delete+insert safest.
-        # subscription table has institute_id as unique.
-        db.table("subscriptions").delete().eq("institute_id", institute_id).execute()
-        db.table("subscriptions").insert(payload).execute()
+        existing = (
+            db.table("subscriptions")
+            .select("id")
+            .eq("institute_id", institute_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+
+        # Write all non-gating fields first. Access remains locked until the
+        # final two status updates complete.
+        if existing:
+            db.table("subscriptions").update(payload).eq("institute_id", institute_id).execute()
+        else:
+            db.table("subscriptions").insert(payload).execute()
+
+        order_updated = False
+        order_filters = []
+        if payment_link_id:
+            order_filters.append(("razorpay_payment_link_id", payment_link_id))
+        if razorpay_order_id:
+            order_filters.extend(
+                [
+                    ("order_id", razorpay_order_id),
+                    ("razorpay_order_id", razorpay_order_id),
+                    ("razorpay_payment_link_id", razorpay_order_id),
+                ]
+            )
+        for column, value in order_filters:
+            try:
+                rows = (
+                    db.table("payment_orders")
+                    .update(
+                        {
+                            "status": "paid",
+                            "razorpay_payment_id": razorpay_payment_id,
+                            "paid_at": starts_at.isoformat(),
+                            "updated_at": starts_at.isoformat(),
+                        }
+                    )
+                    .eq(column, value)
+                    .execute()
+                    .data
+                    or []
+                )
+                if rows:
+                    order_updated = True
+                    break
+                verified = (
+                    db.table("payment_orders")
+                    .select("status")
+                    .eq(column, value)
+                    .eq("status", "paid")
+                    .limit(1)
+                    .execute()
+                    .data
+                    or []
+                )
+                if verified:
+                    order_updated = True
+                    break
+            except Exception:
+                continue
+        if order_filters and not order_updated:
+            raise RuntimeError("Verified payment order could not be marked paid.")
+
+        db.table("institutes").update(
+            {
+                "plan": selected_plan,
+                "status": "active",
+                "subscription_status": "active",
+                "updated_at": starts_at.isoformat(),
+            }
+        ).eq("id", institute_id).execute()
+        db.table("subscriptions").update(
+            {"status": "active", "updated_at": starts_at.isoformat()}
+        ).eq("institute_id", institute_id).execute()
+
+        institute_rows = (
+            db.table("institutes")
+            .select("plan,subscription_status")
+            .eq("id", institute_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        subscription_rows = (
+            db.table("subscriptions")
+            .select("status,plan_name,current_period_start,current_period_end")
+            .eq("institute_id", institute_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        final_institute = institute_rows[0] if institute_rows else {}
+        final_subscription = subscription_rows[0] if subscription_rows else {}
+        if (
+            str(final_institute.get("subscription_status") or "").lower() != "active"
+            or str(final_subscription.get("status") or "").lower() != "active"
+            or str(final_institute.get("plan") or "") != selected_plan
+            or str(final_subscription.get("plan_name") or "") != selected_plan
+            or not final_subscription.get("current_period_start")
+            or not final_subscription.get("current_period_end")
+        ):
+            raise RuntimeError("Subscription activation could not be verified.")
         return True
     except Exception:
+        # Best-effort compensation prevents a partial write from unlocking the
+        # portal through either canonical status field.
+        try:
+            db.table("institutes").update(
+                {"subscription_status": "pending_payment"}
+            ).eq("id", institute_id).execute()
+        except Exception:
+            pass
+        try:
+            db.table("subscriptions").update(
+                {"status": "pending_payment"}
+            ).eq("institute_id", institute_id).execute()
+        except Exception:
+            pass
         return False
 
 

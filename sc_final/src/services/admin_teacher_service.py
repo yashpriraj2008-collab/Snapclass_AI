@@ -6,6 +6,8 @@ import string
 import uuid
 from typing import Any
 
+import streamlit as st
+
 from src.database.client import get_supabase_client
 from src.services.auth_service import ensure_user_profile_for_existing_auth_user
 
@@ -179,6 +181,7 @@ def add_teacher(
     profile = ensure_teacher_profile(institute_id=institute_id, name=name, email=email_norm)
     if not profile.get("ok"):
         if profile.get("pending_auth"):
+            st.cache_data.clear()
             return {
                 "ok": True,
                 "teacher": teacher,
@@ -197,6 +200,7 @@ def add_teacher(
             "debug": profile.get("debug"),
         }
 
+    st.cache_data.clear()
     return {
         "ok": True,
         "teacher": teacher,
@@ -211,7 +215,7 @@ def list_teachers(institute_id: str) -> list[dict[str, Any]]:
     if not db or not institute_id:
         return []
     try:
-        return (
+        teachers = (
             db.table("teachers")
             .select("*")
             .eq("institute_id", institute_id)
@@ -220,6 +224,44 @@ def list_teachers(institute_id: str) -> list[dict[str, Any]]:
             .data
             or []
         )
+        emails = {_email(row.get("email")) for row in teachers if row.get("email")}
+        try:
+            profiles = (
+                db.table("user_profiles")
+                .select("id,user_id,email,full_name,institute_id,role,status")
+                .eq("institute_id", institute_id)
+                .execute()
+                .data
+                or []
+            )
+        except Exception:
+            profiles = []
+        profiles_by_email = {_email(row.get("email")): row for row in profiles if row.get("email")}
+        for teacher in teachers:
+            profile = profiles_by_email.get(_email(teacher.get("email"))) or {}
+            teacher["role"] = "teacher"
+            teacher["profile_status"] = profile.get("status")
+            teacher["user_id"] = teacher.get("user_id") or profile.get("user_id")
+        for profile in profiles:
+            role = _text(profile.get("role")).lower()
+            email_norm = _email(profile.get("email"))
+            if role not in {"teacher", "subject_teacher", "class_teacher"} or not email_norm or email_norm in emails:
+                continue
+            payload = {
+                "id": str(uuid.uuid4()),
+                "institute_id": institute_id,
+                "name": _text(profile.get("full_name")) or email_norm.split("@")[0].title(),
+                "email": email_norm,
+                "teacher_code": _teacher_code(),
+                "invite_status": "pending",
+                "status": _text(profile.get("status")) or "active",
+            }
+            ok, _error = _with_supported_columns("teachers", payload)
+            if ok:
+                teachers.append(payload)
+                emails.add(email_norm)
+                st.cache_data.clear()
+        return teachers
     except Exception:
         return []
 
@@ -310,6 +352,18 @@ def assign_teacher(
     if assignment_type not in {"class_teacher", "subject_teacher"}:
         return {"ok": False, "message": "Invalid assignment type."}
 
+    teacher = _first("teachers", id=teacher_id)
+    class_record = _first("classes", id=class_id)
+    subject = _first("subjects", id=subject_id)
+    if not teacher or _text(teacher.get("institute_id")) != institute_id:
+        return {"ok": False, "message": "Selected teacher does not belong to this institute."}
+    if not class_record or _text(class_record.get("institute_id")) != institute_id:
+        return {"ok": False, "message": "Selected class does not belong to this institute."}
+    if not subject or _text(subject.get("institute_id")) != institute_id:
+        return {"ok": False, "message": "Selected subject does not belong to this institute."}
+    if _text(subject.get("class_id")) != class_id:
+        return {"ok": False, "message": "Selected subject is not linked to the selected class."}
+
     existing = _first(
         "teacher_assignments",
         teacher_id=teacher_id,
@@ -333,4 +387,5 @@ def assign_teacher(
         return {"ok": False, "message": "Teacher assignment could not be saved.", "debug": error}
 
     row = _first("teacher_assignments", id=payload["id"]) or payload
+    st.cache_data.clear()
     return {"ok": True, "assignment": row}

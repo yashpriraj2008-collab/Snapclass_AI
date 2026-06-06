@@ -4,9 +4,6 @@ import streamlit as st
 
 from src.components.navigation import go_to
 from src.components.public_nav import render_public_nav
-from src.database.client import read_app_secrets
-from src.services.payment_service import create_razorpay_order, get_plan, is_razorpay_connected
-from src.utils.user_guards import show_payment_not_configured
 
 
 def go_to_plan(plan_code: str, plan_name: str | None = None) -> None:
@@ -23,16 +20,15 @@ def go_to_plan(plan_code: str, plan_name: str | None = None) -> None:
     st.rerun()
 
 
-
 PLANS = [
     {
         "name": "Demo",
         "price": "Free",
-        "period": "forever",
+        "period": "Demo access",
         "icon": "🌱",
         "color": "#6B7280",
         "grad": "linear-gradient(135deg,#6B7280,#9CA3AF)",
-        "desc": "Try SnapClass AI with up to 30 students.",
+        "desc": "Test SnapClass AI with limited features before subscribing.",
         "features": [
             "✅ 1 Institute",
             "✅ 30 students",
@@ -41,7 +37,7 @@ PLANS = [
             "❌ AI attendance",
             "❌ Email alerts",
         ],
-        "cta": "Get Free Demo",
+        "cta": "Try Demo",
     },
     {
         "name": "Starter",
@@ -59,7 +55,7 @@ PLANS = [
             "✅ CSV export",
             "✅ Email alerts",
         ],
-        "cta": "Start Free Trial",
+        "cta": "Subscribe Now",
     },
     {
         "name": "Pro",
@@ -78,7 +74,7 @@ PLANS = [
             "✅ CSV + PDF export",
             "✅ Priority support",
         ],
-        "cta": "Start Free Trial",
+        "cta": "Subscribe Now",
     },
     {
         "name": "Enterprise",
@@ -105,16 +101,10 @@ def render_pricing_faq() -> None:
     st.markdown("## ❓ Frequently Asked Questions")
     st.caption("Clear answers before an institute starts using SnapClass AI.")
 
-    with st.expander("Is the Demo plan really free?", expanded=False):
+    with st.expander("What is the Demo plan?", expanded=False):
         st.write(
-            "Yes. Demo is free for testing SnapClass AI with limited students. "
-            "It is useful for schools/coaching institutes who want to try the product first."
-        )
-
-    with st.expander("Do paid plans include a free trial?", expanded=False):
-        st.write(
-            "Yes. Starter and Pro can offer a 14-day free trial. "
-            "After trial, payment is required to continue using paid features."
+            "Demo access is for testing SnapClass AI with limited students. "
+            "It helps institutes try the product before subscribing to paid plans."
         )
 
     with st.expander("What happens after payment?", expanded=False):
@@ -144,7 +134,7 @@ def show_pricing() -> None:
     st.markdown(
         """<div style="text-align:center;padding:30px 0 20px;">
       <h1 style="font-family:Poppins,sans-serif;">Simple, Transparent Pricing</h1>
-      <p style="color:#6B7280;">14-day free trial on all paid plans. No credit card required.</p>
+      <p style="color:#6B7280;">No trial required. Choose Demo for testing or select a paid plan to start using SnapClass AI.</p>
     </div>""",
         unsafe_allow_html=True,
     )
@@ -165,6 +155,7 @@ def show_pricing() -> None:
                 f"<div style='padding:5px 0;font-size:.84rem;border-bottom:1px solid #F3F4F6;'>{feature}</div>"
                 for feature in plan["features"]
             )
+
             st.markdown(
                 f"""
             <div class="sc-card" style="{border}text-align:center;padding:26px;">
@@ -183,78 +174,26 @@ def show_pricing() -> None:
             )
 
             btn_t = "primary" if pop else "secondary"
-            if st.button(plan["cta"], key=f"pricing_{plan['name'].lower()}", type=btn_t, use_container_width=True):
+            if st.button(
+                plan["cta"],
+                key=f"pricing_{plan['name'].lower()}",
+                type=btn_t,
+                use_container_width=True,
+            ):
                 plan_name = plan["name"].strip().lower()
 
                 # Demo: activate without payment
                 if plan_name == "demo":
                     go_to_plan("demo", "Demo")
 
-                # Starter/Pro: create Razorpay order (test mode) and open checkout
+                # Paid self-serve plans: create institute, then continue to payment.
                 elif plan_name in {"starter", "pro"}:
-                    institute_id = st.session_state.get("institute_id")
-                    user_id = st.session_state.get("user_id") or st.session_state.get("auth_user_id")
-                    if not institute_id or not user_id:
-                        # Persist selected plan; user will continue on signup.
-                        go_to_plan(plan_name, plan_name.title())
-                        return
+                    go_to_plan(plan_name, plan_name.title())
 
-                    if not is_razorpay_connected():
-                        show_payment_not_configured()
-                        return
-
-                    # Context must be set when institute admin is logged in.
-                    if plan_name == "starter":
-                        plan_code = "starter"
-                    else:
-                        plan_code = "pro"
-
-                    # Persist selection for the signup screen in case user returns.
-                    st.session_state["selected_plan_code"] = plan_code
-                    st.session_state["selected_plan_name"] = plan_name.title()
-
-                    try:
-                        order = create_razorpay_order(
-                            plan_code=plan_code,
-                            institute_id=str(institute_id),
-                            user_id=str(user_id),
-                        )
-
-                    except Exception:
-                        st.warning("Razorpay order could not be created. Please check payment configuration.")
-                        with st.expander("Developer Debug", expanded=False):
-                            st.code("Payment order creation failed.")
-                        return
-
-                    order_id = order["order_id"]
-                    amount = order["amount"]
-                    currency = order["currency"]
-                    key_id = order["key_id"]
-
-                    # Razorpay checkout UI.
-                    # Note: Razorpay checkout JS needs an order_id; signature will be verified on success page.
-                    secrets = read_app_secrets()
-                    import razorpay
-
-                    client = razorpay.Client(auth=(key_id, secrets.get("RAZORPAY_KEY_SECRET")))
-
-                    # Create a checkout link via embedded modal is out of scope here.
-                    # For Phase 5 Part A demo, we route to success page and pass query params.
-                    st.session_state.page = "payment_success"
-                    st.session_state.current_page = "payment_success"
-                    st.query_params["razorpay_order_id"] = order_id
-                    st.query_params["amount"] = str(amount)
-                    st.query_params["currency"] = currency
-                    st.query_params["plan_code"] = plan_code
-                    st.query_params["plan_id"] = str(order.get("plan_id") or "")
-                    st.rerun()
-
-# Enterprise: contact sales
                 elif plan_name == "enterprise":
-                    # Enterprise: contact sales only (no signup form)
                     st.session_state["selected_plan_code"] = "enterprise"
                     st.session_state["selected_plan_name"] = "Enterprise"
-                    st.session_state["selected_plan"] = "enterprise"  # backward compat
+                    st.session_state["selected_plan"] = "enterprise"
                     st.session_state.page = "contact"
                     st.session_state.current_page = "contact"
                     st.rerun()

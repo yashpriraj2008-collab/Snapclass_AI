@@ -1,20 +1,31 @@
 """Institute Students management page."""
 from __future__ import annotations
 
+import html
 import uuid
 from typing import Any
 
-import pandas as pd
 import streamlit as st
 
+from src.components.avatar import avatar_html
 from src.components.form_controls import format_class_option, safe_selectbox
+from src.components.user_identity import password_status_label, render_password_reset, role_badge
 from src.services.admin_context import get_current_institute_id
 from src.services.admin_student_service import add_student, list_classes, list_students
 from src.services.institute_service import _db, init_institute_state
+from src.services.profile_photo_service import profile_photos_by_email
+from src.utils.perf import perf_enabled
 
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _show_debug(data: Any) -> None:
+    if not perf_enabled():
+        return
+    with st.expander("Developer Debug", expanded=False):
+        st.code(str(data))
 
 
 def _class_success_label(class_record: dict[str, Any]) -> str:
@@ -128,8 +139,7 @@ def _render_add_student(inst_id: str, classes: list[dict[str, Any]]) -> None:
         else:
             st.error(result.get("message") or "Student could not be saved.")
             if result.get("debug"):
-                with st.expander("Developer Debug", expanded=False):
-                    st.code(str(result.get("debug")))
+                _show_debug(result.get("debug"))
         return
 
     if not selected_class:
@@ -192,21 +202,82 @@ def _render_students_list(inst_id: str, students: list[dict[str, Any]]) -> None:
             or needle in _text(row.get("roll_no")).lower()
         ]
 
-    df = pd.DataFrame(
-        [
-            {
-                "Name": row.get("name", ""),
-                "Roll No": row.get("roll_no", ""),
-                "Email": row.get("email", ""),
-                "Class": row.get("class_name", ""),
-                "Section": row.get("section", ""),
-                "Parent Phone": row.get("parent_phone", ""),
-                "Status": row.get("status") or row.get("invite_status") or "active",
-            }
-            for row in students
-        ]
+    joined_subjects: dict[str, list[str]] = {}
+    db = _db()
+    photo_by_email = profile_photos_by_email(
+        db,
+        [_text(student.get("email")) for student in students],
     )
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    student_ids = [_text(row.get("id")) for row in students if row.get("id")]
+    if db and student_ids:
+        try:
+            enrollments = (
+                db.table("subject_enrollments")
+                .select("student_id,status,subjects(name,subject_name,code,subject_code)")
+                .in_("student_id", student_ids)
+                .execute()
+                .data
+                or []
+            )
+            for enrollment in enrollments:
+                if _text(enrollment.get("status") or "active").lower() not in {"", "active"}:
+                    continue
+                subject = enrollment.get("subjects") if isinstance(enrollment.get("subjects"), dict) else {}
+                label = _text(subject.get("subject_name") or subject.get("name"))
+                if label:
+                    joined_subjects.setdefault(_text(enrollment.get("student_id")), []).append(label)
+        except Exception as exc:
+            _show_debug({"student_subject_enrollments_error": str(exc)})
+
+    for student in students:
+        student_id = _text(student.get("id"))
+        name = _text(student.get("name") or student.get("full_name")) or "Unknown"
+        email = _text(student.get("email")) or "No email"
+        roll_no = _text(student.get("roll_no")) or "-"
+        class_name = _text(student.get("class_name")) or "-"
+        section = _text(student.get("section"))
+        class_label = f"{class_name}-{section}" if section else class_name
+        status = _text(student.get("profile_status") or student.get("status") or student.get("invite_status") or "active").title()
+        subjects = ", ".join(sorted(set(joined_subjects.get(student_id, [])))) or "Not joined"
+        photo_url = (
+            _text(student.get("profile_photo_url"))
+            or photo_by_email.get(_text(student.get("email")).lower(), "")
+        )
+        student_avatar = avatar_html(
+            {
+                "name": name,
+                "profile_photo_url": photo_url,
+            },
+            size=52,
+        )
+
+        with st.container(border=True):
+            st.markdown(
+                f"""
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+                  <div style="display:flex;gap:12px;align-items:center;">
+                    {student_avatar}
+                    <div>
+                      <h3 style="margin:0 0 6px;">{html.escape(name)}</h3>
+                      <div style="color:#6B7280;">Email: {html.escape(email)}</div>
+                    </div>
+                  </div>
+                  {role_badge("student")}
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 20px;margin-top:14px;">
+                  <div><b>Status:</b> {html.escape(status)}</div>
+                  <div><b>Roll No:</b> {html.escape(roll_no)}</div>
+                  <div><b>Class:</b> {html.escape(class_label)}</div>
+                  <div><b>Joined Subjects:</b> {html.escape(subjects)}</div>
+                  <div><b>Password:</b> {password_status_label(student)}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            render_password_reset(
+                _text(student.get("email")),
+                key=f"reset_student_password_{student_id}",
+            )
 
 
 def show_students() -> None:

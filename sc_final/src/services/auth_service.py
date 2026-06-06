@@ -371,6 +371,43 @@ def get_user_profile_by_email(email: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def get_current_user_profile() -> Optional[Dict[str, Any]]:
+    """Resolve the current Streamlit session user to user_profiles."""
+    import streamlit as st
+
+    user_id = (
+        st.session_state.get("auth_user_id")
+        or st.session_state.get("user_id")
+        or ((st.session_state.get("user") or {}).get("id") if isinstance(st.session_state.get("user"), dict) else None)
+    )
+    if user_id:
+        profile = get_user_profile(str(user_id))
+        if profile:
+            return profile
+
+    email = (
+        st.session_state.get("user_email")
+        or st.session_state.get("email")
+        or st.session_state.get("student_email")
+        or st.session_state.get("teacher_email")
+    )
+    return get_user_profile_by_email(str(email)) if email else None
+
+
+def get_student_by_email(email: str) -> Optional[Dict[str, Any]]:
+    db = get_supabase()
+    if db is None:
+        return None
+    email_norm = (email or "").strip().lower()
+    if not email_norm:
+        return None
+    try:
+        rows = db.table("students").select("*").eq("email", email_norm).limit(1).execute().data or []
+        return rows[0] if rows else None
+    except Exception:
+        return None
+
+
 # -----------------------------------------------------------------------------
 # Public auth functions
 # -----------------------------------------------------------------------------
@@ -672,16 +709,21 @@ def verify_student(email: str, password: str) -> Optional[Dict[str, Any]]:
     st.session_state["logged_in"] = True
     st.session_state["portal"] = "student"
 
-    # Developer Debug collapsed
-    with st.expander("Developer Debug", expanded=False):
-        st.write({
-            "auth_user_id": str(auth_user_id),
-            "auth_user_email": auth_user_email,
-            "profile_found": profile_found,
-            "profile_role": profile_role,
-            "student_found": student_found,
-            "student_id": str(student_id) if student_id is not None else None,
-        })
+    # Developer details stay hidden unless debug mode is explicitly enabled.
+    try:
+        from src.screens.student_dashboard import _debug_enabled
+    except Exception:
+        _debug_enabled = lambda: bool(st.session_state.get("debug_mode"))
+    if _debug_enabled():
+        with st.expander("Developer Debug", expanded=False):
+            st.write({
+                "auth_user_id": str(auth_user_id),
+                "auth_user_email": auth_user_email,
+                "profile_found": profile_found,
+                "profile_role": profile_role,
+                "student_found": student_found,
+                "student_id": str(student_id) if student_id is not None else None,
+            })
 
     return {
         "ok": True,

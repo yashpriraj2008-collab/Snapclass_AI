@@ -55,29 +55,36 @@ def _question_bank(current_role: str, current_page: str) -> List[str]:
 
 def _render_answer_card(response: Dict[str, Any]) -> str:
     title = html.escape(str(response.get("title", "")))
-    answer = html.escape(str(response.get("answer", "")))
-    checks = response.get("checks") or []
-    tables = response.get("tables") or []
+    guide = html.escape(str(response.get("guide") or response.get("answer") or ""))
+    can_do = response.get("can_do") or response.get("checks") or []
+    missing = html.escape(str(response.get("missing") or "If something is missing, complete the previous setup step and refresh the page."))
     next_action = html.escape(str(response.get("next_action", "")))
+    developer = response.get("developer") or []
 
-    checks_html = "".join(f"<li>{html.escape(str(item))}</li>" for item in checks) or "<li>No extra checks available.</li>"
-    tables_html = ", ".join(html.escape(str(item)) for item in tables) if tables else "No Supabase table needed."
+    can_do_html = "".join(f"<li>{html.escape(str(item))}</li>" for item in can_do) or "<li>Use the options on this page to continue.</li>"
+    developer_html = ""
+    if bool(st.session_state.get("debug_mode")) and developer:
+        developer_items = "".join(f"<li>{html.escape(str(item))}</li>" for item in developer)
+        developer_html = f"""
+        <div class="snapbot-answer-heading">For Developers</div>
+        <ul class="snapbot-list">{developer_items}</ul>
+        """
 
     return f"""
     <div class="snapbot-answer-card">
-      <div class="snapbot-answer-heading">Problem</div>
+      <div class="snapbot-answer-heading">Page Guide</div>
       <div class="snapbot-answer-title">{title}</div>
+      <div class="snapbot-answer-text">{guide}</div>
 
-      <div class="snapbot-answer-heading">Why this happens</div>
-      <div class="snapbot-answer-text">{answer}</div>
+      <div class="snapbot-answer-heading">What You Can Do</div>
+      <ul class="snapbot-list">{can_do_html}</ul>
 
-      <div class="snapbot-answer-heading">What to check</div>
-      <ul class="snapbot-list">{checks_html}</ul>
+      <div class="snapbot-answer-heading">If Something Is Missing</div>
+      <div class="snapbot-answer-note">{missing}</div>
 
-      <div class="snapbot-answer-heading">Supabase table</div>
-      <div class="snapbot-answer-note">{tables_html}</div>
+      {developer_html}
 
-      <div class="snapbot-answer-heading">Next action</div>
+      <div class="snapbot-answer-heading">Next Step</div>
       <div class="snapbot-answer-next">{next_action}</div>
     </div>
     """
@@ -137,7 +144,7 @@ def render_snapbot_floating(
         """
         answer_css += f"#snapbot-q{index}:checked + .snapbot-question + .snapbot-answer{{display:block;}}"
 
-    panel_note = "Choose a question to see page-aware help."
+    panel_note = "Choose a question below for help on this page."
     if current_error:
         panel_note = f"Last error captured: {current_error}"
 
@@ -168,7 +175,7 @@ def render_snapbot_floating(
     </div>
   </div>
   <div class="snapbot-footer">
-    {html.escape(panel_note)} Full typing input comes in a later version.
+    {html.escape(panel_note)}
   </div>
 </div>
 """

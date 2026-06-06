@@ -64,6 +64,8 @@ def show_student_auth():
                         st.session_state["student_id"] = str(user.get("student_id"))
                     if user.get("roll"):
                         st.session_state["roll_no"] = str(user.get("roll"))
+                    target_student_page = "subjects" if st.session_state.get("pending_join_code") else "dashboard"
+                    st.session_state["student_page"] = target_student_page
                     login(
                         "student",
                         user.get("name", email.split("@")[0].title()),
@@ -148,7 +150,7 @@ def show_student_auth():
                 st.session_state["user_email"] = email
                 st.session_state["email"] = email
                 st.session_state["user_name"] = student.get("name") or full_name
-                st.session_state["student_page"] = "dashboard"
+                st.session_state["student_page"] = "subjects" if st.session_state.get("pending_join_code") else "dashboard"
                 st.session_state["page"] = "dashboard"
                 st.rerun()
             else:

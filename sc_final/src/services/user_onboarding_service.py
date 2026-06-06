@@ -43,6 +43,82 @@ def _utc_now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
+def _parse_price(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    digits = "".join(ch for ch in text if ch.isdigit())
+    return int(digits) if digits else 0
+
+
+def _fallback_plan(plan_code: str) -> dict[str, Any]:
+    plan_code = (plan_code or "demo").strip().lower()
+    prices = {"demo": 0, "starter": 499, "pro": 999, "enterprise": 4999}
+    cycles = {"demo": "forever", "starter": "monthly", "pro": "monthly", "enterprise": "monthly"}
+    return {
+        "id": "",
+        "plan_code": plan_code,
+        "billing_cycle": cycles.get(plan_code, "monthly"),
+        "currency": "INR",
+        "price": prices.get(plan_code, 0),
+        "amount_paise": prices.get(plan_code, 0) * 100,
+    }
+
+
+def _normalize_plan_row(plan_code: str, row: dict[str, Any] | None) -> dict[str, Any]:
+    fallback = _fallback_plan(plan_code)
+    plan = {**fallback, **(row or {})}
+    plan_code_norm = _text(plan.get("plan_code") or plan_code).lower() or "demo"
+    price = (
+        _parse_price(plan.get("price_monthly"))
+        or _parse_price(plan.get("price_display"))
+        or _parse_price(plan.get("price"))
+        or _parse_price(plan.get("amount"))
+        or _parse_price(plan.get("amount_paise")) // 100
+        or fallback["price"]
+    )
+    if plan_code_norm == "pro" and not price:
+        price = 999
+    if plan_code_norm == "pro":
+        price = 999
+
+    billing_cycle = _text(plan.get("billing_cycle") or fallback["billing_cycle"]).lower() or "monthly"
+    currency = _text(plan.get("currency") or "INR").upper() or "INR"
+    plan.update(
+        {
+            "plan_code": plan_code_norm,
+            "billing_cycle": billing_cycle,
+            "currency": currency,
+            "price": price,
+            "amount_paise": _parse_price(plan.get("amount_paise")) or price * 100,
+        }
+    )
+    return plan
+
+
+def _fetch_plan_by_code(db, plan_code: str) -> dict[str, Any]:
+    plan_code = (plan_code or "demo").strip().lower()
+    try:
+        rows = (
+            db.table("plans")
+            .select("*")
+            .eq("plan_code", plan_code)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if rows:
+            return _normalize_plan_row(plan_code, rows[0])
+    except Exception:
+        pass
+    return _normalize_plan_row(plan_code, None)
+
+
 def _missing_invite_code_column(error: Any) -> bool:
     raw = str(error or "").lower()
     return (
@@ -146,11 +222,28 @@ def _update_institute_best_effort(institute: dict[str, Any], updates: dict[str, 
     if not clean_updates:
         return institute
 
-    try:
-        rows = db.table("institutes").update(clean_updates).eq("id", institute_id).execute().data or []
-        return rows[0] if rows else {**institute, **clean_updates}
-    except Exception:
-        return institute
+    write_payload = dict(clean_updates)
+    for _attempt in range(len(clean_updates) + 1):
+        try:
+            rows = db.table("institutes").update(write_payload).eq("id", institute_id).execute().data or []
+            return rows[0] if rows else {**institute, **write_payload}
+        except Exception as exc:
+            raw = str(exc).lower()
+            removed = False
+            for column in list(write_payload):
+                if column in raw and (
+                    "does not exist" in raw
+                    or "schema cache" in raw
+                    or "could not find" in raw
+                    or "pgrst204" in raw
+                    or "42703" in raw
+                ):
+                    write_payload.pop(column, None)
+                    removed = True
+                    break
+            if not removed:
+                return institute
+    return institute
 
 
 def safe_sign_up(email: str, password: str) -> dict[str, Any]:
@@ -325,7 +418,7 @@ def _get_or_create_institute(form_data: dict[str, Any]) -> dict[str, Any]:
         selected_plan_code, "Demo"
     )
 
-    return create_institute(
+    created = create_institute(
         name=institute_name,
         city=city,
         state=state,
@@ -336,66 +429,172 @@ def _get_or_create_institute(form_data: dict[str, Any]) -> dict[str, Any]:
         plan=plan_label,
         status="active",
     )
+    if created.get("ok") and isinstance(created.get("data"), dict):
+        plan_status = "demo" if selected_plan_code == "demo" else "pending_payment"
+        institute_status = "active" if selected_plan_code == "demo" else "pending_payment"
+        created["data"] = _update_institute_best_effort(
+            created["data"],
+            {"plan": plan_label, "status": institute_status, "subscription_status": plan_status},
+        )
+    return created
 
 
 
-def _ensure_subscription(institute_id: str, plan_code: str) -> dict[str, Any]:
+def _ensure_subscription(institute_id: str, plan_code: str, admin_user_id: str = "") -> dict[str, Any]:
     db, message = _db_or_message()
     if not db:
         return {"ok": False, "message": message}
 
     plan_code = (plan_code or "demo").strip().lower()
+    debug: dict[str, Any] = {
+        "selected_plan_code": plan_code,
+        "plan_id": None,
+        "plan_row": None,
+        "institute_id": institute_id,
+        "admin_user_id": _text(admin_user_id),
+        "subscription_insert_payload": None,
+        "supabase_error": None,
+    }
 
     try:
-        plans = (
-            db.table("plans")
-            .select("id,billing_cycle")
-            .eq("plan_code", plan_code)
-            .limit(1)
-            .execute()
-            .data
-            or []
-        )
-        if not plans:
+        plan = _fetch_plan_by_code(db, plan_code)
+        plan_id = _text(plan.get("id"))
+        debug["plan_id"] = plan_id
+        debug["plan_row"] = plan
+
+        if not plan_id:
             return {"ok": False, "message": f"Missing plan: {plan_code}."}
 
-        plan = plans[0]
         existing = (
             db.table("subscriptions")
-            .select("id,status")
+            .select("*")
             .eq("institute_id", institute_id)
-            .eq("plan_id", plan["id"])
             .limit(1)
             .execute()
             .data
             or []
         )
-        if existing:
-            return {"ok": True, "reused": True}
 
         now = dt.datetime.now(dt.timezone.utc)
-        is_trial = plan_code in {"starter", "pro"}
+        is_paid_plan = plan_code in {"starter", "pro", "enterprise"}
 
         payload = {
             "institute_id": institute_id,
-            "plan_id": plan["id"],
+            "plan_id": plan_id,
+            "plan_code": plan_code,
             "billing_cycle": plan.get("billing_cycle") or "monthly",
-            "status": "trialing" if is_trial else "active",
+            "status": "pending_payment" if is_paid_plan else "active",
             "starts_at": now.isoformat(),
-            "ends_at": (now + dt.timedelta(days=14)).isoformat() if is_trial else (now + dt.timedelta(days=14)).isoformat(),
+            "ends_at": (now + dt.timedelta(days=30 if is_paid_plan else 3650)).isoformat(),
         }
-        # For demo, keep it active-like semantics in current schema; trial semantics are handled on UI.
-        if not is_trial:
-            payload["status"] = "active"
 
-        db.table("subscriptions").insert(payload).execute()
-        return {"ok": True}
+        debug["subscription_insert_payload"] = payload
+
+        write_payload = dict(payload)
+        removed_columns: list[str] = []
+        for _ in range(3):
+            try:
+                debug["subscription_insert_payload"] = write_payload
+                if existing:
+                    db.table("subscriptions").update(write_payload).eq("id", existing[0]["id"]).execute()
+                    result = {"ok": True, "reused": True, "subscription": {**existing[0], **write_payload}, "plan": plan}
+                else:
+                    rows = db.table("subscriptions").insert(write_payload).execute().data or []
+                    result = {"ok": True, "subscription": rows[0] if rows else write_payload, "plan": plan}
+                if removed_columns:
+                    result["schema_fallback"] = f"omitted unsupported columns: {', '.join(removed_columns)}"
+                return result
+            except Exception as write_exc:
+                raw_write = str(write_exc).lower()
+                removed = False
+                for column in ("plan_code", "status"):
+                    check_constraint = (
+                        column == "status"
+                        and "status" in raw_write
+                        and ("check constraint" in raw_write or "violates check" in raw_write)
+                    )
+                    if column in write_payload and column in raw_write and (
+                        "does not exist" in raw_write
+                        or "schema cache" in raw_write
+                        or "could not find" in raw_write
+                        or "pgrst204" in raw_write
+                        or "42703" in raw_write
+                        or check_constraint
+                    ):
+                        if check_constraint and column == "status":
+                            write_payload[column] = "active"
+                            removed_columns.append("status=pending_payment")
+                            removed = True
+                            break
+                        write_payload.pop(column, None)
+                        removed_columns.append(column)
+                        removed = True
+                        break
+                if not removed:
+                    raise write_exc
     except Exception as exc:
+        debug["supabase_error"] = str(exc)
         return {
             "ok": False,
-            "message": f"Subscription for plan '{plan_code}' could not be created.",
-            "debug": str(exc),
+            "message": "Account created, but subscription setup failed. Please try again or contact support.",
+            "debug": debug,
         }
+
+
+def _verify_onboarding_rows(
+    *,
+    auth_user_id: str,
+    email: str,
+    institute_id: str,
+) -> dict[str, Any]:
+    db = get_supabase_client()
+    checks = {
+        "auth_user_id_present": bool(_text(auth_user_id)),
+        "user_profile_exists": False,
+        "institute_exists": False,
+        "subscription_exists": False,
+    }
+    if not db:
+        return checks
+
+    try:
+        checks["user_profile_exists"] = bool(
+            db.table("user_profiles")
+            .select("id")
+            .eq("email", _email(email))
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+    except Exception:
+        pass
+    try:
+        checks["institute_exists"] = bool(
+            db.table("institutes")
+            .select("id")
+            .eq("id", institute_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+    except Exception:
+        pass
+    try:
+        checks["subscription_exists"] = bool(
+            db.table("subscriptions")
+            .select("id")
+            .eq("institute_id", institute_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+    except Exception:
+        pass
+
+    return checks
 
 
 
@@ -478,38 +677,45 @@ def create_or_continue_admin_onboarding(
             }
 
         if not invalid_login and existing_profile:
-            # If we already have an account mapping but can't sign in, still don't spam sign_up.
-            return {"ok": False, "message": "Account already exists. Please login.", "account_exists": True}
+            auth_user_id = _text(existing_profile.get("user_id") or existing_profile.get("id"))
+            if not auth_user_id:
+                return {"ok": False, "message": "Account already exists. Please login.", "account_exists": True}
 
         # If invalid credentials -> sign_up once, then sign_in
-        try:
-            sign = db.auth.sign_up(
-                {
-                    "email": email_norm,
-                    "password": password,
-                    "options": {"data": {"full_name": admin_name_norm, "role": "admin"}},
-                }
-            )
-            # After sign_up, immediately sign_in
-            auth_in = db.auth.sign_in_with_password({"email": email_norm, "password": password})
-            user = getattr(auth_in, "user", None)
-            auth_user_id = _user_id(user)
-            if not auth_user_id:
-                return {"ok": False, "message": "Account created. Please login to finish setup."}
-        except Exception as exc2:
-            msg2 = str(exc2).lower()
-            if "already" in msg2 or "registered" in msg2 or "exists" in msg2:
-                return {"ok": False, "message": "Account already exists. Please login.", "account_exists": True}
-            if "rate limit" in msg2:
-                return {
-                    "ok": False,
-                    "message": "Too many signup attempts. Please wait a few minutes, or login if this account already exists.",
-                    "rate_limited": True,
-                }
-            # email confirmation issues: treat as missing session
-            if "confirm" in msg2 or "verify" in msg2 or "session" in msg2:
-                return {"ok": False, "message": "Account created. Please login to finish setup.", "missing_session": True}
-            return {"ok": False, "message": "Could not create demo admin account.", "debug": str(exc2)}
+        if not _text(locals().get("auth_user_id")):
+            try:
+                db.auth.sign_up(
+                    {
+                        "email": email_norm,
+                        "password": password,
+                        "options": {"data": {"full_name": admin_name_norm, "role": "admin"}},
+                    }
+                )
+                # After sign_up, immediately sign_in
+                auth_in = db.auth.sign_in_with_password({"email": email_norm, "password": password})
+                user = getattr(auth_in, "user", None)
+                auth_user_id = _user_id(user)
+                if not auth_user_id:
+                    return {"ok": False, "message": "Account created. Please login to finish setup."}
+            except Exception as exc2:
+                msg2 = str(exc2).lower()
+                if "already" in msg2 or "registered" in msg2 or "exists" in msg2:
+                    auth_user_id = _text((existing_profile or {}).get("user_id") or (existing_profile or {}).get("id"))
+                    if not auth_user_id:
+                        return {"ok": False, "message": "Account already exists. Please login.", "account_exists": True}
+                elif "rate limit" in msg2:
+                    return {
+                        "ok": False,
+                        "message": "Too many signup attempts. Please wait a few minutes, or login if this account already exists.",
+                        "rate_limited": True,
+                    }
+                # email confirmation issues: treat as missing session unless we can reuse profile mapping
+                elif "confirm" in msg2 or "verify" in msg2 or "session" in msg2:
+                    auth_user_id = _text((existing_profile or {}).get("user_id") or (existing_profile or {}).get("id"))
+                    if not auth_user_id:
+                        return {"ok": False, "message": "Account created. Please login to finish setup.", "missing_session": True}
+                else:
+                    return {"ok": False, "message": "Could not create demo admin account.", "debug": str(exc2)}
 
     # 3) Create/reuse institute
     institute_result = _get_or_create_institute(
@@ -534,6 +740,15 @@ def create_or_continue_admin_onboarding(
     institute_id = _text(institute.get("id"))
     if not institute_id:
         return {"ok": False, "message": "Failed to create institute."}
+    plan_label = {"demo": "Demo", "starter": "Starter", "pro": "Pro", "enterprise": "Enterprise"}.get(
+        selected_plan_norm, "Demo"
+    )
+    plan_status = "demo" if selected_plan_norm == "demo" else "pending_payment"
+    institute_status = "active" if selected_plan_norm == "demo" else "pending_payment"
+    institute = _update_institute_best_effort(
+        institute,
+        {"plan": plan_label, "status": institute_status, "subscription_status": plan_status},
+    )
 
     # 4) Create/update user_profiles role='admin' (idempotent via save_user_profile)
     profile = link_user_profile(auth_user_id, email_norm, admin_name_norm, "admin", institute_id)
@@ -541,10 +756,15 @@ def create_or_continue_admin_onboarding(
         return {"ok": False, "message": "Failed to create admin profile.", "debug": str(profile.get("error") or "")}
 
     # 5) Subscription reuse/update (idempotent)
-    subscription = _ensure_subscription(institute_id, selected_plan_norm)
+    subscription = _ensure_subscription(institute_id, selected_plan_norm, auth_user_id)
     if not subscription.get("ok"):
         return subscription
 
+    signup_checks = _verify_onboarding_rows(
+        auth_user_id=auth_user_id,
+        email=email_norm,
+        institute_id=institute_id,
+    )
 
     return {
         "ok": True,
@@ -553,6 +773,8 @@ def create_or_continue_admin_onboarding(
         "institute_id": institute_id,
         "email": email_norm,
         "name": admin_name_norm,
+        "subscription": subscription.get("subscription"),
+        "signup_checks": signup_checks,
     }
 
 

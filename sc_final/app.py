@@ -1,6 +1,7 @@
 """SnapClass AI — Main router. Fully fixed."""
 import os
 import sys
+import traceback
 import streamlit as st
 
 from src.components.ui import load_css
@@ -9,6 +10,7 @@ from src.database.client import preflight_supabase_secrets
 from src.utils.session import init_session
 from src.utils.responsive_ui import inject_responsive_css
 from src.components.snapbot import render_snapbot_floating
+from src.utils.perf import perf_enabled, time_block
 
 
 
@@ -18,44 +20,43 @@ root_dir = os.path.abspath(os.path.dirname(__file__))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
+favicon_path = os.path.join(root_dir, "static", "favicon.png")
 st.set_page_config(
     page_title="SnapClass AI",
-    page_icon="🎓",
+    page_icon=favicon_path if os.path.isfile(favicon_path) else "🎓",
     layout="wide",
     initial_sidebar_state="auto",
 )
-load_css()
+with time_block("app startup"):
+    load_css()
 
 st.markdown(
     """
 <style>
 
-/* INPUT TEXT */
-input, textarea {
-    color: black !important;
-    background-color: white !important;
-}
-
-/* SELECTBOX */
-.stSelectbox div[data-baseweb="select"] {
-    background: white !important;
-    color: black !important;
-}
-
-/* LABELS */
-label, p, span, div {
+.stTextInput input,
+.stDateInput input {
+    background-color: #ffffff !important;
     color: #111827 !important;
+}
+
+.stFileUploader,
+.stCameraInput {
+    background-color: transparent !important;
+    color: #111827 !important;
+}
+
+.stFileUploader * {
+    color: #111827 !important;
+}
+
+.snap-hidden-debug {
+    display: none;
 }
 
 /* SIDEBAR */
 section[data-testid="stSidebar"] {
     background: #ffffff !important;
-}
-
-/* BUTTON */
-.stButton button {
-    border-radius: 12px !important;
-    font-weight: 600 !important;
 }
 
 /* MAIN PAGE */
@@ -66,11 +67,6 @@ section[data-testid="stSidebar"] {
 /* CARDS */
 .block-container {
     padding-top: 1rem;
-}
-
-/* REMOVE DARK INPUT BORDER */
-input {
-    border: 1px solid #d1d5db !important;
 }
 
 /* SUCCESS BOX */
@@ -84,10 +80,23 @@ input {
 )
 inject_responsive_css()
 
-init_session()
+with time_block("auth context load"):
+    init_session()
 
 if st.query_params.get("reset") == "1":
     st.session_state.clear()
+
+join_code_from_url = str(
+    st.query_params.get("join_code")
+    or st.query_params.get("join-code")
+    or ""
+).strip().upper()
+if join_code_from_url:
+    st.session_state["pending_join_code"] = join_code_from_url
+    if not st.session_state.get("role"):
+        st.session_state["page"] = "student_auth"
+    elif st.session_state.get("role") == "student":
+        st.session_state["student_page"] = "subjects"
 
 supabase_ready, _supabase_message = preflight_supabase_secrets(show_notice=True)
 if not supabase_ready:
@@ -98,6 +107,9 @@ if "page" not in st.session_state:
 
 page = st.session_state.get("page", "landing")
 role = st.session_state.get("role")
+if st.query_params.get("razorpay_payment_id") and st.query_params.get("razorpay_signature"):
+    page = "payment_success"
+    st.session_state.page = page
 
 
 def _go_home() -> None:
@@ -149,8 +161,8 @@ def _snapbot_page_key() -> str:
     return page
 
 
-import traceback
-
+_page_timer = time_block(f"current page render: app/{role or 'public'}/{page}")
+_page_timer.__enter__()
 try:
     # Supabase detection is handled lazily by src.database.client.
     # Do not touch st.secrets directly here so demo mode stays clean when
@@ -187,6 +199,14 @@ try:
         from src.screens.payment_failed import show_payment_failed
 
         show_payment_failed()
+    elif page == "payment":
+        if role in {"institute_admin", "admin"}:
+            from src.components.sidebar import institute_sidebar
+
+            institute_sidebar()
+        from src.screens.payment import show_payment
+
+        show_payment()
     elif page == "admin_billing":
         from src.screens.admin_billing import show_admin_billing
 
@@ -226,7 +246,6 @@ try:
     # ── FOUNDER
     elif role == "founder":
         from src.components.sidebar import founder_sidebar
-
         founder_sidebar()
         fp = st.session_state.get("founder_page", "founder_dashboard")
         if fp == "founder_institutes":
@@ -272,9 +291,33 @@ try:
     # ── INSTITUTE ADMIN
     elif role in {"institute_admin", "admin"}:
         from src.components.sidebar import institute_sidebar
-
         institute_sidebar()
         ip = st.session_state.get("institute_page", "institute_dashboard")
+        from src.services.admin_context import get_current_institute_id
+        from src.services.institute_service import get_institute_by_id
+        from src.services.subscription_access import (
+            can_access_admin_portal,
+            get_current_subscription,
+            render_billing_workspace,
+            render_subscription_activation_popup,
+        )
+
+        institute_id = str(get_current_institute_id() or st.session_state.get("institute_id") or "")
+        institute = st.session_state.get("current_institute") or {}
+        if institute_id and (not institute or not institute.get("name")):
+            loaded_institute = get_institute_by_id(institute_id)
+            if loaded_institute:
+                institute = loaded_institute
+                st.session_state.current_institute = loaded_institute
+        subscription = get_current_subscription(institute_id)
+        pending_payment_locked = bool(institute_id and not can_access_admin_portal(institute, subscription))
+        if pending_payment_locked:
+            st.session_state.page = "payment"
+            st.session_state.institute_page = "institute_dashboard"
+            render_billing_workspace(institute, subscription)
+        else:
+            render_subscription_activation_popup()
+
         if ip == "my_institute":
             from src.screens.my_institute import show_my_institute
 
@@ -301,7 +344,9 @@ try:
             show_analytics()
         elif ip == "reports":
             st.markdown("### 📄 Reports")
-            st.info("Reports are not implemented yet.")
+            from src.screens.institute_reports import show_reports
+
+            show_reports()
         elif ip == "settings":
             from src.screens.settings import show_settings
 
@@ -332,10 +377,14 @@ try:
         st.stop()
 
 except Exception as e:
+    _page_timer.__exit__(type(e), e, e.__traceback__)
     st.error("The app hit an unexpected error. Please retry or contact support.")
-    with st.expander("Developer Debug", expanded=False):
-        st.code(traceback.format_exc(), language="python")
+    if perf_enabled():
+        with st.expander("Developer Debug", expanded=False):
+            st.code(traceback.format_exc(), language="python")
     st.stop()
+else:
+    _page_timer.__exit__(None, None, None)
 
 
 

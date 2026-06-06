@@ -1,7 +1,7 @@
 """Admin portal — all pages."""
 import streamlit as st
 import plotly.express as px
-from src.components.sidebar import admin_sidebar
+from src.components.sidebar import institute_sidebar
 from src.components.cards import stat_card, alert_card
 from src.components.ui import db_status_banner
 from src.database.queries import (get_students, get_teachers, get_subjects,
@@ -9,19 +9,19 @@ from src.database.queries import (get_students, get_teachers, get_subjects,
                                    add_institute, add_student, add_teacher, add_subject,
                                    delete_student, delete_teacher, delete_institute)
 from src.services.demo_data import INSTITUTES as DEMO_INSTITUTES
-from src.utils.session import check_route_access, nav_admin
+from src.utils.session import check_route_access
 import pandas as pd
 
 def show_admin_portal() -> None:
     check_route_access()
-    admin_sidebar()
-    page = st.session_state.get("admin_page","dashboard")
+    institute_sidebar()
+    page = st.session_state.get("institute_page", "institute_dashboard")
     dispatch = {
-        "dashboard": _dashboard,
-        "schools":   _schools,
+        "institute_dashboard": _dashboard,
+        "my_institute": _schools,
         "teachers":  _teachers,
         "students":  _students,
-        "subjects":  _subjects_page,
+        "classes_subjects": _subjects_page,
         "analytics": _analytics,
         "reports":   _reports,
     }
