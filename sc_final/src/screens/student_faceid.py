@@ -438,9 +438,11 @@ def show_faceid() -> None:
     with tab2:
         _enroll_tab(ai_ready)
 
-    if st.button("Back to Dashboard", key="faceid_back"):
-        st.session_state.pop("faceid_step", None)
-        nav_student("dashboard")
+    back_left, back_col, back_right = st.columns([0.12, 0.76, 0.12])
+    with back_col:
+        if st.button("Back to Dashboard", key="faceid_back"):
+            st.session_state.pop("faceid_step", None)
+            nav_student("dashboard")
 
 
 def _legacy_show_faceid() -> None:
@@ -714,7 +716,7 @@ def _mark_tab(ai_ready: bool, ctx: dict[str, Any] | None = None, enrolled: bool 
               align-items: center;
               display: flex;
               gap: 12px;
-              margin: 24px 0 12px;
+              margin: 20px 0 10px;
           }
           .faceid-step-label > span {
               align-items: center;
@@ -786,77 +788,92 @@ def _mark_tab(ai_ready: bool, ctx: dict[str, Any] | None = None, enrolled: bool 
               padding: 5px 10px;
               text-transform: uppercase;
           }
-          .faceid-layout-card {
-              background: linear-gradient(155deg, #ffffff 0%, #f8f9ff 100%);
-              border-radius: 22px;
-              padding: 34px 28px;
-              text-align: center;
-              box-shadow: 0 12px 32px rgba(15, 23, 42, 0.07);
-              border: 1px solid #e4e8f2;
-              min-height: 360px;
-              display: flex;
-              flex-direction: column;
-              justify-content: center;
-              align-items: center;
-          }
-          .faceid-icon-circle {
-              width: 124px;
-              height: 124px;
-              border-radius: 50%;
-              border: 2px solid #818cf8;
-              background: linear-gradient(145deg, #eef2ff, #ffffff);
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              margin-bottom: 24px;
-              box-shadow: 0 14px 34px rgba(99, 102, 241, 0.16), inset 0 0 0 9px #f7f7ff;
-          }
-          .faceid-title {
-              font-size: 25px;
-              font-weight: 800;
-              color: #111827;
-              margin-bottom: 8px;
-              letter-spacing: -0.02em;
-          }
-          .faceid-subtitle {
-              font-size: 14px;
-              color: #64748b;
-              line-height: 1.6;
-              max-width: 280px;
-          }
-          .faceid-tips {
-              border-top: 1px solid #e5e7eb;
+          .faceid-guide {
+              align-items: flex-start;
+              background: transparent;
+              border: 0;
+              border-bottom: 1px solid #edf0f5;
+              border-radius: 0;
+              box-sizing: border-box !important;
               display: grid;
-              gap: 9px;
-              margin-top: 24px;
-              padding-top: 20px;
-              text-align: left;
-              width: 100%;
+              gap: 14px;
+              grid-template-columns: 50px minmax(0, 1fr);
+              margin: 0 0 20px;
+              max-width: 100%;
+              min-width: 0;
+              padding: 0 0 18px;
+              width: auto;
           }
-          .faceid-tip {
-              align-items: center;
-              color: #475569;
+          .faceid-guide-icon {
+              background: #eef2ff;
+              border: 1px solid #d9ddff;
+              border-radius: 13px;
               display: flex;
-              font-size: 12px;
-              gap: 9px;
+              flex: 0 0 50px;
+              height: 50px;
+              align-items: center;
+              justify-content: center;
           }
-          .faceid-tip span {
-              background: #e0e7ff;
+          .faceid-guide-icon svg {
+              height: 28px;
+              width: 28px;
+          }
+          .faceid-guide-copy {
+              min-width: 0;
+              padding-top: 2px;
+          }
+          .faceid-guide-title {
+              color: #172033;
+              font-size: 15px;
+              font-weight: 800;
+              line-height: 1.3;
+          }
+          .faceid-guide-text {
+              color: #64748b;
+              font-size: 13px;
+              margin-top: 3px;
+          }
+          .faceid-guide-tips {
+              display: flex;
+              flex-wrap: wrap;
+              gap: 7px;
+              justify-content: flex-start;
+              margin-top: 11px;
+              min-width: 0;
+          }
+          .faceid-guide-tip {
+              background: #f8fafc;
+              border: 1px solid #e5eaf2;
               border-radius: 999px;
-              display: block;
-              height: 7px;
-              width: 7px;
+              color: #475569;
+              font-size: 11px;
+              font-weight: 600;
+              padding: 6px 9px;
+              white-space: nowrap;
           }
           .st-key-faceid_capture_card {
               background: #ffffff;
               border: 1px solid #e4e8f2 !important;
-              border-radius: 22px !important;
-              box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
-              padding: 24px !important;
+              border-radius: 20px !important;
+              box-sizing: border-box !important;
+              box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+              max-width: 100% !important;
+              min-width: 0 !important;
+              overflow: hidden;
+              padding: 22px !important;
+              width: 100% !important;
+          }
+          .st-key-faceid_capture_card > div,
+          .st-key-faceid_capture_card [data-testid="stVerticalBlock"],
+          .st-key-faceid_capture_card [data-testid="stElementContainer"],
+          .st-key-faceid_capture_card .element-container {
+              box-sizing: border-box !important;
+              max-width: 100% !important;
+              min-width: 0 !important;
           }
           .faceid-capture-title {
               color: #172033;
-              font-size: 20px;
+              font-size: 19px;
               font-weight: 800;
               letter-spacing: -0.02em;
               margin-bottom: 4px;
@@ -867,13 +884,31 @@ def _mark_tab(ai_ready: bool, ctx: dict[str, Any] | None = None, enrolled: bool 
               margin-bottom: 18px;
           }
           div[data-testid="stCameraInput"] {
+              background: #0f1115;
               border: 1px solid #dfe3ec;
               border-radius: 16px;
-              box-shadow: none;
+              box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
+              margin: 8px auto 0;
+              max-width: 620px !important;
               overflow: hidden;
+              width: 100% !important;
           }
           div[data-testid="stCameraInput"] video {
+              aspect-ratio: 16 / 9;
               border-radius: 0 !important;
+              display: block;
+              height: auto !important;
+              max-height: 315px;
+              object-fit: cover;
+              width: 100%;
+          }
+          div[data-testid="stCameraInput"] img {
+              aspect-ratio: 16 / 9;
+              display: block;
+              height: auto !important;
+              max-height: 315px;
+              object-fit: cover;
+              width: 100%;
           }
           div[data-testid="stCameraInput"] button,
           button[data-testid="stCameraInputButton"] {
@@ -908,27 +943,81 @@ def _mark_tab(ai_ready: bool, ctx: dict[str, Any] | None = None, enrolled: bool 
           }
           .st-key-faceid_verify button {
               border: 0;
+              box-sizing: border-box !important;
               box-shadow: 0 10px 24px rgba(99, 102, 241, 0.22);
               font-weight: 800;
-              min-height: 50px;
+              margin: 0 !important;
+              max-width: 100% !important;
+              min-height: 48px;
+              width: 100% !important;
+          }
+          .st-key-faceid_verify,
+          .st-key-faceid_verify > div,
+          .st-key-faceid_verify [data-testid="stButton"] {
+              box-sizing: border-box !important;
+              margin-left: 0 !important;
+              margin-right: 0 !important;
+              max-width: 100% !important;
+              min-width: 0 !important;
+              width: 100% !important;
+          }
+          .st-key-faceid_capture_card .faceid-step-label {
+              border-top: 1px solid #edf0f5;
+              margin-top: 18px;
+              padding-top: 16px;
+          }
+          .st-key-faceid_capture_card [data-testid="stDateInput"] input {
+              border-color: #d9deea !important;
+              box-shadow: none !important;
+          }
+          .st-key-faceid_capture_card [data-testid="stDateInput"] input:focus {
+              border-color: #818cf8 !important;
+              box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12) !important;
+          }
+          .st-key-faceid_workspace [data-testid="stHorizontalBlock"] {
+              align-items: flex-start;
+              max-width: 100%;
+              min-width: 0;
+          }
+          .st-key-faceid_workspace [data-testid="column"] {
+              max-width: 100%;
+              min-width: 0;
+          }
+          .st-key-faceid_back {
+              margin-top: 12px;
+              max-width: 210px;
+          }
+          .st-key-faceid_back button {
+              background: #ffffff !important;
+              border: 1px solid #dfe3ec !important;
+              box-shadow: 0 5px 16px rgba(15, 23, 42, 0.06) !important;
+              font-weight: 700 !important;
+              width: 100%;
           }
           @media (max-width: 900px) {
-              .faceid-layout-card {
-                  min-height: 280px;
-                  padding: 28px 22px;
-              }
-              .faceid-title {
-                  font-size: 23px;
-              }
-              .faceid-icon-circle {
-                  width: 108px;
-                  height: 108px;
-              }
               .st-key-faceid_capture_card {
                   padding: 18px !important;
               }
+              div[data-testid="stCameraInput"] video,
+              div[data-testid="stCameraInput"] img {
+                  max-height: none;
+              }
               .faceid-status-badge {
                   display: none;
+              }
+          }
+          @media (max-width: 600px) {
+              .faceid-guide {
+                  grid-template-columns: 42px minmax(0, 1fr);
+                  padding-bottom: 15px;
+              }
+              .faceid-guide-icon {
+                  border-radius: 11px;
+                  flex-basis: 42px;
+                  height: 42px;
+              }
+              .faceid-guide-tip {
+                  white-space: normal;
               }
           }
         </style>
@@ -943,41 +1032,33 @@ def _mark_tab(ai_ready: bool, ctx: dict[str, Any] | None = None, enrolled: bool 
     )
 
     with st.container(key="faceid_workspace"):
-        left_col, right_col = st.columns([0.78, 1.32], gap="large")
-
-        with left_col:
-            st.markdown(
-                """
-                <div class="faceid-layout-card">
-                    <div class="faceid-icon-circle">
-                        <svg width="54" height="54" viewBox="0 0 24 24"
-                             fill="none" stroke="#6366f1" stroke-width="1.55"
+        side_left, main_col, side_right = st.columns([0.12, 0.76, 0.12])
+        with main_col:
+            with st.container(border=True, key="faceid_capture_card"):
+                st.markdown(
+                    """
+                    <div class="faceid-guide">
+                      <div class="faceid-guide-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="1.7"
                              stroke-linecap="round" stroke-linejoin="round">
                           <circle cx="12" cy="8" r="3"/>
                           <path d="M6 21v-1a6 6 0 0 1 12 0v1"/>
-                          <path d="M4 6C4 4.9 4.9 4 6 4"/>
-                          <path d="M20 6C20 4.9 19.1 4 18 4"/>
-                          <path d="M4 18C4 19.1 4.9 20 6 20"/>
-                          <path d="M20 18C20 19.1 19.1 20 18 20"/>
+                          <path d="M4 6C4 4.9 4.9 4 6 4M20 6C20 4.9 19.1 4 18 4"/>
                         </svg>
+                      </div>
+                      <div class="faceid-guide-copy">
+                        <div class="faceid-guide-title">Prepare for a clear photo</div>
+                        <div class="faceid-guide-text">Center your face and look directly at the camera.</div>
+                        <div class="faceid-guide-tips">
+                          <span class="faceid-guide-tip">Good lighting</span>
+                          <span class="faceid-guide-tip">No mask or dark glasses</span>
+                          <span class="faceid-guide-tip">One face only</span>
+                        </div>
+                      </div>
                     </div>
-                    <div class="faceid-title">Ready for your photo</div>
-                    <div class="faceid-subtitle">Center your face in the frame and look directly at the camera.</div>
-                    <div class="faceid-tips">
-                      <div class="faceid-tip"><span></span>Use even, front-facing light</div>
-                      <div class="faceid-tip"><span></span>Remove masks or dark glasses</div>
-                      <div class="faceid-tip"><span></span>Keep only one face in frame</div>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        with right_col:
-            with st.container(border=True, key="faceid_capture_card"):
-                st.markdown(
-                    '<div class="faceid-capture-title">Capture a clear face photo</div>'
-                    '<div class="faceid-capture-copy">Your image is used only to verify your enrolled FaceID profile.</div>',
+                    <div class="faceid-capture-title">Capture face photo</div>
+                    <div class="faceid-capture-copy">Your image is used only to verify your enrolled FaceID profile.</div>
+                    """,
                     unsafe_allow_html=True,
                 )
 

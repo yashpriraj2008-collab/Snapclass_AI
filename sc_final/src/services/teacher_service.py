@@ -150,26 +150,26 @@ def _legacy_teacher_assignments(
     supabase,
     teacher_id: str,
     teacher_email: str = "",
+    institute_id: str = "",
 ) -> list[dict[str, Any]]:
     """Build assignment rows from legacy subject/class ownership columns."""
     rows: list[dict[str, Any]] = []
+    institute_id = str(institute_id or "").strip()
 
     subject_queries = [("teacher_id", teacher_id)]
     if teacher_email:
         subject_queries.append(("teacher_email", teacher_email))
     for column, value in subject_queries:
         try:
-            subjects = (
-                supabase.table("subjects")
-                .select("*")
-                .eq(column, value)
-                .execute()
-                .data
-                or []
-            )
+            query = supabase.table("subjects").select("*").eq(column, value)
+            if institute_id:
+                query = query.eq("institute_id", institute_id)
+            subjects = query.execute().data or []
         except Exception:
             continue
         for subject in subjects:
+            if institute_id and str(subject.get("institute_id") or "") != institute_id:
+                continue
             class_id = str(subject.get("class_id") or "").strip()
             subject_id = str(subject.get("id") or "").strip()
             if not class_id or not subject_id or not _active(subject):
@@ -188,17 +188,15 @@ def _legacy_teacher_assignments(
             )
 
     try:
-        classes = (
-            supabase.table("classes")
-            .select("*")
-            .eq("teacher_id", teacher_id)
-            .execute()
-            .data
-            or []
-        )
+        query = supabase.table("classes").select("*").eq("teacher_id", teacher_id)
+        if institute_id:
+            query = query.eq("institute_id", institute_id)
+        classes = query.execute().data or []
     except Exception:
         classes = []
     for class_row in classes:
+        if institute_id and str(class_row.get("institute_id") or "") != institute_id:
+            continue
         class_id = str(class_row.get("id") or "").strip()
         if not class_id or not _active(class_row):
             continue
@@ -273,10 +271,27 @@ def get_teacher_assignments(supabase, teacher_id) -> list[dict[str, Any]]:
                 assignments = []
 
     teacher_email = str(st.session_state.get("teacher_email") or "").strip().lower()
+    teacher_institute_id = ""
+    try:
+        teacher_rows = (
+            supabase.table("teachers")
+            .select("institute_id,email")
+            .eq("id", teacher_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if teacher_rows:
+            teacher_institute_id = str(teacher_rows[0].get("institute_id") or "").strip()
+            teacher_email = teacher_email or str(teacher_rows[0].get("email") or "").strip().lower()
+    except Exception:
+        teacher_institute_id = ""
     legacy = _legacy_teacher_assignments(
         supabase,
         str(teacher_id),
         teacher_email,
+        teacher_institute_id,
     )
     return _hydrate_assignments(
         supabase,

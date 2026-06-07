@@ -146,6 +146,64 @@ def _required_student_fields_match(student: dict[str, Any], payload: dict[str, A
     return all(_text(student.get(column)) == _text(payload.get(column)) for column in REQUIRED_STUDENT_COLUMNS)
 
 
+def _auto_enroll_student_in_class_active_subjects(db, *, student_id: str | None, class_id: str | None) -> bool:
+    """Auto-enroll a newly added student into all active subjects for the given class.
+
+    Avoid duplicate subject_enrollments by checking existence first.
+    Returns True if any enrollment was created.
+    """
+    if not db or not student_id or not class_id:
+        return False
+
+    subjects = (
+        db.table("subjects")
+        .select("*")
+        .eq("class_id", class_id)
+        .execute()
+        .data
+        or []
+    )
+    subjects = [
+        subject
+        for subject in subjects
+        if str(subject.get("status") or "active").strip().lower() in {"", "active"}
+        and subject.get("is_active") is not False
+    ]
+    subject_ids = [str(s.get("id")) for s in subjects if s.get("id")]
+    if not subject_ids:
+        return False
+
+    created_any = False
+    for subject_id in subject_ids:
+        existing = (
+            db.table("subject_enrollments")
+            .select("id")
+            .eq("student_id", student_id)
+            .eq("subject_id", subject_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if existing:
+            continue
+
+        payload = {
+            "student_id": student_id,
+            "subject_id": subject_id,
+            "status": "active",
+        }
+        try:
+            db.table("subject_enrollments").insert(payload).execute()
+            created_any = True
+        except Exception:
+            # Avoid breaking admin add flow if enrollment is blocked by RLS.
+            continue
+
+    return created_any
+
+
+
 def ensure_student_profile(
     *,
     institute_id: str,
@@ -239,11 +297,20 @@ def add_student(
     if not profile.get("ok"):
         if profile.get("pending_auth"):
             st.cache_data.clear()
+            # Even if auth profile is pending, we can still create the subject enrollments.
+            # (The student will be enrolled by student_id once created.)
+            enroll_ok = False
+            try:
+                enroll_ok = _auto_enroll_student_in_class_active_subjects(db=_db(), student_id=student.get("id"), class_id=class_id)
+            except Exception:
+                enroll_ok = False
+
             return {
                 "ok": True,
                 "student": student,
                 "student_code": code,
                 "login_pending": True,
+                "subject_enrolled": bool(enroll_ok),
                 "message": (
                     "Student saved. Login account pending. Create Supabase Auth user "
                     "or ask student to register with the same email."
@@ -256,8 +323,23 @@ def add_student(
             "debug": profile.get("debug"),
         }
 
+    # Auto-enroll the student in all active subjects for that class.
+    # This reduces later attendance/visibility confusion.
+    subject_enrolled = False
+    try:
+        subject_enrolled = _auto_enroll_student_in_class_active_subjects(db=_db(), student_id=student.get("id"), class_id=class_id)
+    except Exception:
+        subject_enrolled = False
+
     st.cache_data.clear()
-    return {"ok": True, "student": student, "profile": profile.get("profile"), "student_code": code}
+    return {
+        "ok": True,
+        "student": student,
+        "profile": profile.get("profile"),
+        "student_code": code,
+        "subject_enrolled": bool(subject_enrolled),
+    }
+
 
 
 def list_classes(institute_id: str) -> list[dict[str, Any]]:

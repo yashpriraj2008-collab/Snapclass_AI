@@ -77,18 +77,25 @@
 .sidebar-brand {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 2px 4px 12px;
-  margin: 0;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  margin: 0 0 14px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #F7F5FF 0%, #FFF7FC 100%);
+  border: 1px solid #E9E4FF;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(79, 70, 229, .08);
 }
 
 .sidebar-brand-logo {
-  width: 44px;
-  height: 44px;
-  flex: 0 0 44px;
-  border-radius: 13px;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  border-radius: 12px;
   object-fit: contain;
-  box-shadow: 0 8px 24px rgba(99, 102, 241, .2);
+  box-shadow: 0 6px 18px rgba(99, 102, 241, .18);
 }
 
 .sidebar-brand-logo-fallback {
@@ -102,26 +109,34 @@
 
 .sidebar-brand-text {
   min-width: 0;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
+  overflow: hidden;
 }
 
 .sidebar-brand-name {
   color: #111827 !important;
   font-family: "Poppins", "Inter", sans-serif;
-  font-size: 1.08rem;
-  font-weight: 850;
-  letter-spacing: -.03em;
-  line-height: 1.05;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: -.025em;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-brand-subtitle {
   color: #6B7280 !important;
-  font-size: .68rem;
-  font-weight: 500;
+  font-size: .62rem;
+  font-weight: 600;
+  letter-spacing: .01em;
   line-height: 1.2;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-user-card {

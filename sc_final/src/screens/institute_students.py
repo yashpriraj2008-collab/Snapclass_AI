@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import html
+import json
+import os
+import re
 import uuid
 from typing import Any
 
@@ -15,6 +18,10 @@ from src.services.admin_student_service import add_student, list_classes, list_s
 from src.services.institute_service import _db, init_institute_state
 from src.services.profile_photo_service import profile_photos_by_email
 from src.utils.perf import perf_enabled
+
+DEBUG_MODE_ENV = os.getenv("DEBUG_MODE", "false").strip().lower() == "true"
+
+
 
 
 def _text(value: Any) -> str:
@@ -62,27 +69,100 @@ def _load_students(inst_id: str) -> list[dict[str, Any]]:
     return _fallback_students(inst_id)
 
 
-def _show_student_success(student: dict[str, Any], code: str) -> None:
+def _copy_button_html(label: str, value: str, key: str) -> str:
+    button_id = re.sub(r"[^a-zA-Z0-9_-]", "-", key)
+    script = (
+        "navigator.clipboard && "
+        f"navigator.clipboard.writeText({json.dumps(value or '')});"
+    )
+    return (
+        f'<button id="{html.escape(button_id, quote=True)}" type="button" '
+        'style="border:1px solid #D8DEEA;border-radius:10px;background:#FFFFFF;'
+        'color:#334155;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;" '
+        f'onclick="{html.escape(script, quote=True)}">'
+        f"{html.escape(label)}</button>"
+    )
+
+
+def _show_student_success(
+    student: dict[str, Any],
+    code: str,
+    login_status: str = "Pending Registration",
+    subject_access: str | None = None,
+) -> None:
+    subject_access = subject_access or "Not joined yet"
     name = _text(student.get("name")) or "Student"
     email = _text(student.get("email"))
     roll_no = _text(student.get("roll_no"))
+
     invite_message = (
-        f"Hi {name}, your SnapClass AI student code is {code}. "
+        f"Hi {name}, your SnapClass AI student code is {code}.\n"
         "Register in the Student Portal using this same email."
     )
-    st.success("Student added successfully. Student should login with the same email.")
-    st.write(f"Name: {name}")
-    st.write(f"Roll No: {roll_no}")
-    st.write(f"Email/Login: {email}")
-    st.write(f"Student Code: {code}")
-    st.info("Next step: the student can register/login with this email and code, then view attendance reports.")
-    st.code(code)
-    st.text_area("Invite message", value=invite_message, height=92, key=f"student_invite_message_{code}")
+    st.success("Student added successfully")
+    copy_code_button = _copy_button_html(
+        "Copy Student Code",
+        code,
+        key=f"copy_student_code_{code}",
+    )
+    copy_invite_button = _copy_button_html(
+        "Copy Invite Message",
+        invite_message,
+        key=f"copy_invite_{code}",
+    )
+    st.markdown(
+        f"""
+        <div style="border:1px solid #BBF7D0;border-radius:14px;padding:16px;margin-top:10px;background:#F7FFF9;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;">
+            <div><b>Name:</b> {html.escape(name)}</div>
+            <div><b>Roll No:</b> {html.escape(roll_no)}</div>
+            <div><b>Email/Login:</b> {html.escape(email)}</div>
+            <div><b>Class:</b> {html.escape(_text(student.get('class_name')) or _text(student.get('class_label')) or '-')}</div>
+          </div>
+
+          <div style="margin-top:14px;border-top:1px solid rgba(0,0,0,0.06);padding-top:14px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+              <div>
+                <div style="color:#6B7280;font-size:.88rem;margin-bottom:4px;"><b>Student Login Code</b></div>
+                <div style="font-size:1.15rem;font-weight:700;letter-spacing:.02em;">{html.escape(code)}</div>
+                <div style="margin-top:9px;">{copy_code_button}</div>
+              </div>
+              <div style="min-width:220px;">
+                <div style="color:#6B7280;font-size:.88rem;margin-bottom:4px;"><b>Login Status</b></div>
+                <div style="font-weight:600;margin-bottom:10px;">{html.escape(login_status)}</div>
+                <div style="color:#6B7280;font-size:.88rem;margin-bottom:4px;"><b>Subject Access</b></div>
+                <div style="font-weight:600;">{html.escape(subject_access)}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="border:1px solid #E5E7EB;border-radius:14px;padding:14px;margin-top:14px;">
+          <div style="font-weight:700;margin-bottom:6px;">Invite Message</div>
+          <div style="color:#374151;white-space:pre-wrap;">{html.escape(invite_message)}</div>
+          <div style="margin-top:10px;">{copy_invite_button}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _login_status_label(student: dict[str, Any]) -> str:
+    if student.get("user_id"):
+        return "Active"
+    return "Pending Registration"
+
+
 
 
 def _render_add_student(inst_id: str, classes: list[dict[str, Any]]) -> None:
+
     st.subheader("Add New Student")
     st.caption("Create the student record with the same email they will use for login.")
+
+    if DEBUG_MODE_ENV:
+        st.caption("DEBUG_MODE is enabled: additional dev info may be shown.")
+
+
 
     if not classes:
         st.info("Please create a class first before adding students.")
@@ -133,9 +213,26 @@ def _render_add_student(inst_id: str, classes: list[dict[str, Any]]) -> None:
         if result.get("ok"):
             student = result.get("student") or {}
             code = _text(result.get("student_code") or student.get("student_code"))
-            if result.get("login_pending"):
-                st.warning(result.get("message") or "Student saved. Login account pending.")
-            _show_student_success(student, code)
+
+            login_status = (
+                "Pending Registration"
+                if result.get("login_pending")
+                else _login_status_label(student)
+            )
+
+            subject_access = "Auto-enrolled" if result.get("subject_enrolled") else "Not joined yet"
+
+            # Single clear success message (no duplicated warnings)
+            _show_student_success(
+                student,
+                code,
+                login_status=login_status,
+                subject_access=subject_access,
+            )
+
+
+
+
         else:
             st.error(result.get("message") or "Student could not be saved.")
             if result.get("debug"):
@@ -230,6 +327,7 @@ def _render_students_list(inst_id: str, students: list[dict[str, Any]]) -> None:
             _show_debug({"student_subject_enrollments_error": str(exc)})
 
     for student in students:
+
         student_id = _text(student.get("id"))
         name = _text(student.get("name") or student.get("full_name")) or "Unknown"
         email = _text(student.get("email")) or "No email"
@@ -269,8 +367,10 @@ def _render_students_list(inst_id: str, students: list[dict[str, Any]]) -> None:
                   <div><b>Roll No:</b> {html.escape(roll_no)}</div>
                   <div><b>Class:</b> {html.escape(class_label)}</div>
                   <div><b>Joined Subjects:</b> {html.escape(subjects)}</div>
-                  <div><b>Password:</b> {password_status_label(student)}</div>
+                  <div><b>Password Status:</b> {password_status_label(student)}</div>
                 </div>
+
+
                 """,
                 unsafe_allow_html=True,
             )

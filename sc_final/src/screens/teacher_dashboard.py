@@ -702,10 +702,21 @@ def _load_teacher_sessions(supabase, ctx: dict[str, Any]) -> list[dict]:
     ]
 
 
-def _load_teacher_attendance_records(supabase, sessions: list[dict], ctx: dict[str, Any]) -> list[dict]:
+def _load_teacher_attendance_records(
+    supabase,
+    sessions: list[dict],
+    ctx: dict[str, Any],
+    allowed_student_ids: set[str] | None = None,
+) -> list[dict]:
     session_ids = sorted({str(row.get("id")) for row in sessions if row.get("id")})
     class_ids = set(ctx.get("assigned_class_ids") or [])
     subject_ids = set(ctx.get("assigned_subject_ids") or [])
+    restrict_students = allowed_student_ids is not None
+    allowed_student_ids = {
+        str(student_id)
+        for student_id in (allowed_student_ids or set())
+        if student_id
+    }
     if not supabase:
         return []
 
@@ -713,7 +724,12 @@ def _load_teacher_attendance_records(supabase, sessions: list[dict], ctx: dict[s
         try:
             rows = supabase.table("attendance_records").select("*").in_("session_id", session_ids).execute().data or []
             if rows:
-                return rows
+                return [
+                    row
+                    for row in rows
+                    if not restrict_students
+                    or str(row.get("student_id") or "") in allowed_student_ids
+                ]
         except Exception as exc:
             _show_debug("Developer Debug", {"attendance_records_by_session_error": str(exc)})
 
@@ -721,9 +737,15 @@ def _load_teacher_attendance_records(supabase, sessions: list[dict], ctx: dict[s
         rows = supabase.table("attendance_records").select("*").execute().data or []
     except Exception:
         return []
-    return [
+    scoped_rows = [
         row for row in rows
         if (str(row.get("class_id") or "") in class_ids or str(row.get("subject_id") or "") in subject_ids)
+    ]
+    return [
+        row
+        for row in scoped_rows
+        if not restrict_students
+        or str(row.get("student_id") or "") in allowed_student_ids
     ]
 
 
@@ -750,7 +772,16 @@ def _live_teacher_data_uncached(supabase=None) -> dict[str, Any]:
         )
     with time_block("Supabase queries: teacher dashboard/reports"):
         sessions = _load_teacher_sessions(supabase, ctx)
-        records = _load_teacher_attendance_records(supabase, sessions, ctx)
+        records = _load_teacher_attendance_records(
+            supabase,
+            sessions,
+            ctx,
+            {
+                str(student.get("id"))
+                for student in students
+                if student.get("id")
+            },
+        )
     classes_by_id = _rows_by_id(class_rows)
     subjects_by_id = _rows_by_id(subject_rows)
     students_by_id = _rows_by_id(students)

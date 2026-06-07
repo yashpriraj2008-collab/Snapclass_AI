@@ -418,23 +418,61 @@ def _inject_page_css() -> None:
           font-size: 14px;
         }
         .plan-actions-panel {
-          padding: 20px;
+          padding: 24px;
           background: #ffffff;
           border: 1px solid #E5E7EB;
-          border-radius: 16px;
-          box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
+          border-radius: 18px;
+          box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
         }
-        .plan-selected-preview {
-          margin-top: 8px;
-          padding: 8px 10px;
-          border-radius: 8px;
-          background: #F8FAFC;
-          color: #111827;
-          font-size: 13px;
-          font-weight: 700;
-          border: 1px solid #E5E7EB;
-          white-space: normal;
-          overflow-wrap: anywhere;
+        .plan-action-summary {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          min-height: 52px;
+          margin-top: 18px;
+          padding: 12px 14px;
+          border: 1px solid #E0E7FF;
+          border-radius: 14px;
+          background: #F8FAFF;
+          color: #334155;
+          font-size: 14px;
+          line-height: 1.45;
+        }
+        .plan-action-summary strong {
+          color: #0F172A;
+        }
+        .plan-action-summary .arrow {
+          color: #6366F1;
+          font-size: 18px;
+          font-weight: 800;
+        }
+        .st-key-update_subscription {
+          margin-top: 18px;
+        }
+        .st-key-update_subscription button {
+          min-height: 48px !important;
+          border-radius: 13px !important;
+          font-size: 15px !important;
+          font-weight: 750 !important;
+          background: linear-gradient(90deg, #6366F1, #D946A8) !important;
+          box-shadow: 0 10px 24px rgba(99, 102, 241, 0.22) !important;
+        }
+        .st-key-update_subscription button:hover {
+          transform: translateY(-1px) !important;
+          box-shadow: 0 14px 30px rgba(99, 102, 241, 0.28) !important;
+        }
+        @media (max-width: 768px) {
+          .plan-actions-panel {
+            padding: 18px;
+          }
+          .plan-action-summary {
+            align-items: flex-start;
+            flex-direction: column;
+            gap: 4px;
+          }
+          .plan-action-summary .arrow {
+            transform: rotate(90deg);
+          }
         }
         .plans-overview-table {
           width: 100%;
@@ -581,17 +619,6 @@ def _option_label_plan(plan: dict[str, Any]) -> str:
     return f"{plan['Plan name']} - {plan['Price']}"
 
 
-def _selected_preview(label: str, value: str) -> None:
-    st.markdown(
-        f"""
-        <div class="plan-selected-preview">
-          {html.escape(label)}: {html.escape(value)}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
 def render_founder_plans() -> None:
     db_status_banner()
     _inject_page_css()
@@ -663,7 +690,6 @@ def render_founder_plans() -> None:
             index=0,
             key="founder_plan_action_institute",
         )
-        _selected_preview("Selected", selected_institute_label)
     with c2:
         selected_plan_label = st.selectbox(
             "Select New Plan",
@@ -671,7 +697,6 @@ def render_founder_plans() -> None:
             index=0,
             key="founder_plan_action_plan",
         )
-        _selected_preview("Selected", selected_plan_label)
     with c3:
         selected_status = st.selectbox(
             "Select Status",
@@ -679,9 +704,30 @@ def render_founder_plans() -> None:
             index=0,
             key="founder_plan_action_status",
         )
-        _selected_preview("Selected", selected_status.replace("_", " ").title())
 
-    if st.button("Update Subscription", key="update_subscription", type="primary", use_container_width=True):
+    st.markdown(
+        f"""
+        <div class="plan-action-summary">
+          <span><strong>{html.escape(selected_institute_label)}</strong></span>
+          <span class="arrow">&rarr;</span>
+          <span>{html.escape(selected_plan_label)}</span>
+          <span>&middot;</span>
+          <span>Status: <strong>{html.escape(selected_status.replace("_", " ").title())}</strong></span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    _action_space, action_col = st.columns([2.2, 1], gap="medium")
+    with action_col:
+        update_clicked = st.button(
+            "Update Subscription",
+            key="update_subscription",
+            type="primary",
+            use_container_width=True,
+        )
+
+    if update_clicked:
         selected_institute = institute_by_label[selected_institute_label]
         selected_plan = plan_by_label[selected_plan_label]
         ok, error = _update_subscription(selected_institute, selected_plan, selected_status)
