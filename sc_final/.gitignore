@@ -9,25 +9,23 @@
 # Python
 __pycache__/
 **/__pycache__/
-*.py[cod]
+*.pyc
 *.pyo
 *.pyd
+.Python
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 
 # Virtual environments
-venv/
 .venv/
-.venv11/
-.venv311/
+.venv*/
+venv/
 env/
 ENV/
 **/venv/
-**/.venv/
-**/.venv11/
-**/.venv311/
+**/.venv*/
 
 # Debug / temporary
 debug_secrets_supabase.py
@@ -61,11 +59,18 @@ streamlit-*.err.log
 streamlit-*.out.log
 streamlit_*.log
 streamlit_*.err.log
+streamlit_*.out.log
 
 # Local tools/cache
 .codex-run/
 **/.codex-run/
 .blackbox/
+
+# Temporary / Codex / AI files
+TODO_*.md
+**/TODO_*.md
+*_task.log
+*_check.log
 
 # Large/generated files
 *.zip

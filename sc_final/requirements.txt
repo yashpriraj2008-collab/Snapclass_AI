@@ -2,24 +2,19 @@
 # Run: pip install -r requirements.txt
 
 streamlit==1.41.1
+altair==5.5.0
 plotly==5.24.1
 pandas==2.2.3
 Pillow==10.4.0
-qrcode[pil]
+qrcode[pil]==8.2
+requests>=2.27,<3
 
 # Database
 supabase==2.10.0
-
+postgrest==0.18.0
 
 # Razorpay
 razorpay==1.4.2
-
-
-# Reports
-fpdf2==2.8.2
-
-# Email notifications
-resend==2.5.1
 
 # AI Face Recognition
 # IMPORTANT: TensorFlow/DeepFace often fails on Python 3.13. Use Python 3.11.

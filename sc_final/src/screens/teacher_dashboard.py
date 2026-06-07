@@ -1960,7 +1960,6 @@ def _ai_att():
     st.session_state["_ai_selected_subject_label"] = subject_label(selected_subject)
     st.session_state["ai_selected_class_id"] = cls
     st.session_state["ai_selected_subject_id"] = subj
-    st.session_state["ai_attendance_date"] = d.isoformat() if d else str(date.today())
 
     st.markdown("#### 📸 Upload Class Photo or Take Live Photo")
     t1, t2 = st.tabs(["📁 Upload Photo", "📷 Live Camera"])

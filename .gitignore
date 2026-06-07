@@ -1,31 +1,33 @@
-# Secrets
-.env
-.env.*
-*.env
-.streamlit/secrets.toml
-**/.streamlit/secrets.toml
-
-# Python cache
+# Python
 __pycache__/
 **/__pycache__/
-*.py[cod]
+*.pyc
 *.pyo
 *.pyd
+.Python
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 
 # Virtual environments
-venv/
 .venv/
-.venv11/
-.venv311/
+.venv*/
+venv/
 env/
 ENV/
+**/.venv*/
 **/venv/
-**/.venv/
-**/.venv11/
-**/.venv311/
+
+# Streamlit secrets
+.streamlit/secrets.toml
+**/.streamlit/secrets.toml
+
+# Env files
+.env
+.env.*
+*.env
+.env.local
+.env.production
 
 # Python build files
 *.egg-info/
@@ -49,6 +51,9 @@ Thumbs.db
 streamlit-*.log
 streamlit-*.err.log
 streamlit-*.out.log
+streamlit_*.log
+streamlit_*.err.log
+streamlit_*.out.log
 
 # Large/generated files
 *.zip
@@ -71,4 +76,10 @@ checkpoints/
 .codex-run/
 **/.codex-run/
 .blackbox/
+
+# Temporary / Codex / AI files
+TODO_*.md
+**/TODO_*.md
+*_task.log
+*_check.log
 

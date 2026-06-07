@@ -42,11 +42,11 @@ DEMO_AUTH_ENABLED = "false"
 APP_PUBLIC_URL = "https://your-public-app-url"
 SUPABASE_URL = "https://YOUR_PROJECT_REF.supabase.co"
 SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY"
-RESEND_API_KEY = "optional-if-email-enabled"
-SENDER_EMAIL = "optional-if-email-enabled"
-RAZORPAY_KEY_ID = "optional-until-payments-enabled"
-RAZORPAY_KEY_SECRET = "optional-until-payments-enabled"
-RAZORPAY_WEBHOOK_SECRET = "required-before-live-payments"
+RESEND_API_KEY = "YOUR_RESEND_API_KEY"
+SENDER_EMAIL = "YOUR_VERIFIED_SENDER_EMAIL"
+RAZORPAY_KEY_ID = "YOUR_RAZORPAY_KEY_ID"
+RAZORPAY_KEY_SECRET = "YOUR_RAZORPAY_KEY_SECRET"
+RAZORPAY_WEBHOOK_SECRET = "YOUR_RAZORPAY_WEBHOOK_SECRET"
 ```
 
 Never use a Supabase service-role key in this Streamlit frontend app.
