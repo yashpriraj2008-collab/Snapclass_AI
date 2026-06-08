@@ -1,5 +1,6 @@
 """Razorpay payment service.
 
+
 Adds:
 - Razorpay client from Streamlit secrets
 - create_order() for INR plan payments
@@ -17,10 +18,13 @@ import hashlib
 import os
 
 
-from src.database.client import get_supabase_client, read_app_secrets
+from src.database.client import get_supabase_client
+
+from src.utils.config import get_config
 
 
 # Phase 5 integrates with DB-backed `public.plans`.
+
 
 
 def _parse_price(value) -> int:
@@ -136,15 +140,17 @@ def get_plan_amount_inr(plan: str) -> int:
 
 
 def _razorpay_client():
-    """Create Razorpay client using Streamlit secrets.
+    """Create Razorpay client.
+
+    Uses Render environment variables first, then local st.secrets.
 
     Returns None if Razorpay keys are missing.
     """
-    secrets = read_app_secrets()
-    key_id = secrets.get("RAZORPAY_KEY_ID")
-    key_secret = secrets.get("RAZORPAY_KEY_SECRET")
+    key_id = get_config("RAZORPAY_KEY_ID", "")
+    key_secret = get_config("RAZORPAY_KEY_SECRET", "")
     if not key_id or not key_secret:
         return None
+
 
     import razorpay
 
@@ -282,7 +288,7 @@ def create_razorpay_payment_link(plan_code: str, institute_id: str, user_id: str
 
         billing_cycle = str(plan.get("billing_cycle") or "monthly").strip().lower()
         currency = str(plan.get("currency") or "INR").strip().upper()
-        app_base_url = read_app_secrets().get("APP_BASE_URL") or os.getenv("APP_BASE_URL") or "http://localhost:8507"
+        app_base_url = get_config("APP_BASE_URL", "") or os.getenv("APP_BASE_URL") or "http://localhost:8507"
         callback_url = f"{app_base_url}/?payment_return=1&institute_id={institute_id}"
         plan_name = str(plan.get("display_name") or plan.get("plan_code") or plan_code).strip()
         customer = _get_payment_customer(db, str(institute_id), str(user_id))
@@ -364,11 +370,11 @@ def create_razorpay_order(plan_code: str, institute_id: str, user_id: str) -> di
         raise ValueError("Plan is not active")
 
     receipt = f"snapclass_{int(__import__('time').time() * 1000)}"
-    secrets = read_app_secrets()
-    key_id = secrets.get("RAZORPAY_KEY_ID")
+    key_id = get_config("RAZORPAY_KEY_ID", "")
 
     # Razorpay Amount in paise
     amount_paise = int(plan.get("amount_paise") or 0)
+
     if amount_paise <= 0:
         raise ValueError("This plan has no Razorpay amount")
 
@@ -377,7 +383,8 @@ def create_razorpay_order(plan_code: str, institute_id: str, user_id: str) -> di
     if not key_id:
         raise RuntimeError("RAZORPAY_KEY_ID missing in secrets")
 
-    key_secret = secrets.get("RAZORPAY_KEY_SECRET")
+    key_secret = get_config("RAZORPAY_KEY_SECRET", "")
+
     if not key_secret:
         raise RuntimeError("RAZORPAY_KEY_SECRET missing in secrets")
 
@@ -434,9 +441,10 @@ def verify_payment_signature(
     razorpay_signature: str,
 ) -> bool:
     """Verify checkout signature before granting paid access."""
-    key_secret = read_app_secrets().get("RAZORPAY_KEY_SECRET")
+    key_secret = get_config("RAZORPAY_KEY_SECRET", "")
     if not key_secret:
         return False
+
 
     message = f"{razorpay_order_id}|{razorpay_payment_id}".encode("utf-8")
     expected = hmac.new(
@@ -456,8 +464,9 @@ def verify_payment_link_signature(
     razorpay_signature: str,
 ) -> bool:
     """Verify a Razorpay Payment Link callback signature."""
-    key_secret = read_app_secrets().get("RAZORPAY_KEY_SECRET")
+    key_secret = get_config("RAZORPAY_KEY_SECRET", "")
     values = (
+
         payment_link_id,
         payment_link_reference_id,
         payment_link_status,
@@ -485,7 +494,8 @@ def verify_payment_link_signature(
 
 def verify_webhook_signature(*, body: bytes, signature: str) -> bool:
     """Verify Razorpay webhook payload before processing it."""
-    secret = read_app_secrets().get("RAZORPAY_WEBHOOK_SECRET")
+    secret = get_config("RAZORPAY_WEBHOOK_SECRET", "")
+
     if not secret or not body or not signature:
         return False
 
