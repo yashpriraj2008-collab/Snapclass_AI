@@ -153,12 +153,16 @@ def show_my_institute() -> None:
         with st.form("edit_inst_form"):
             c1, c2 = st.columns(2)
             name = c1.text_input("Institute Name", value=inst.get("name", ""))
+            INSTITUTE_TYPES = ["School", "Coaching", "Tuition Centre", "College"]
+            current_type = inst.get("institute_type", "School")
+            type_index = INSTITUTE_TYPES.index(current_type) if current_type in INSTITUTE_TYPES else 0
+            # Handle legacy "Tuition" value
+            if current_type.lower() in ("tuition", "tuition centre"):
+                type_index = INSTITUTE_TYPES.index("Tuition Centre")
             itype = c2.selectbox(
-                "Type",
-                ["School", "Coaching", "Tuition", "College"],
-                index=["School", "Coaching", "Tuition", "College"].index(
-                    inst.get("institute_type", "School")
-                ),
+                "Institute Type",
+                INSTITUTE_TYPES,
+                index=type_index,
             )
 
             c3, c4 = st.columns(2)
@@ -171,7 +175,15 @@ def show_my_institute() -> None:
 
             c5, c6 = st.columns(2)
             phone = c5.text_input("Admin Phone", value=inst.get("admin_phone", ""))
-            acyr = c6.text_input("Academic Year", value=inst.get("academic_year", ""))
+            ACADEMIC_YEARS = ["2025-26", "2026-27", "2027-28", "2028-29"]
+            DEFAULT_ACYR = "2026-27"
+            current_acyr = str(inst.get("academic_year", "")).strip() or DEFAULT_ACYR
+            acyr_index = ACADEMIC_YEARS.index(current_acyr) if current_acyr in ACADEMIC_YEARS else 1
+            acyr = c6.selectbox(
+                "Academic Year",
+                ACADEMIC_YEARS,
+                index=acyr_index,
+            )
 
             thr = st.slider(
                 "Attendance Threshold (%)",

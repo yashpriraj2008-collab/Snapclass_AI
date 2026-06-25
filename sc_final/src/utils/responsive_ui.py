@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import streamlit as st
+from collections.abc import Iterable
+from typing import Any
 
 
 def inject_responsive_css() -> None:
@@ -10,6 +12,10 @@ def inject_responsive_css() -> None:
     st.markdown(
         """
 <style>
+
+/* Ensure Streamlit columns never force horizontal scroll */
+html, body, .stApp, .main { overflow-x: hidden !important; }
+
 html,
 body,
 .stApp,
@@ -128,6 +134,26 @@ div[role="option"][aria-selected="true"] {
   flex-wrap: nowrap !important;
 }
 
+div[data-testid="stForm"] {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+
+div[data-testid="stForm"] > form {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+
+div[data-testid="stForm"] [data-testid="column"] {
+  min-width: 0 !important;
+}
+
+div[data-testid="stForm"] .stButton > button {
+  width: 100% !important;
+}
+
 .sc-class-item,
 .sc-alert {
   min-width: 0 !important;
@@ -144,6 +170,12 @@ div[role="option"][aria-selected="true"] {
 }
 
 @media (max-width: 768px) {
+  /* Mobile-first type system */
+  :root {
+    --sc-heading-font-size: 1.375rem; /* ~22px */
+    --sc-body-font-size: 0.875rem; /* ~14px */
+  }
+
   .main .block-container,
   [data-testid="stAppViewContainer"] .block-container {
     max-width: 100% !important;
@@ -174,6 +206,17 @@ div[role="option"][aria-selected="true"] {
   p,
   label,
   .stMarkdown,
+  [data-testid="stCaptionContainer"],
+  [data-testid="stMarkdown"],
+  span {
+    font-size: var(--sc-body-font-size) !important;
+    line-height: 1.45 !important;
+  }
+
+  /* Restore caption container sizing override for consistency */
+  p,
+  label,
+  .stMarkdown,
   [data-testid="stCaptionContainer"] {
     font-size: 0.95rem !important;
     line-height: 1.5 !important;
@@ -182,6 +225,14 @@ div[role="option"][aria-selected="true"] {
   .stButton > button {
     width: 100% !important;
     min-height: 44px !important;
+  }
+
+  div[data-testid="stForm"] {
+    padding: 0 !important;
+  }
+
+  div[data-testid="stForm"] > form {
+    padding: 0 !important;
   }
 
   input,
@@ -201,6 +252,17 @@ div[role="option"][aria-selected="true"] {
   [data-testid="stForm"] {
     width: 100% !important;
     max-width: 100% !important;
+  }
+
+  .stTextInput label,
+  .stTextArea label,
+  .stSelectbox label,
+  .stDateInput label,
+  .stNumberInput label,
+  .stFileUploader label {
+    display: block !important;
+    width: 100% !important;
+    white-space: normal !important;
   }
 
   [data-testid="stHorizontalBlock"] {
@@ -299,6 +361,15 @@ div[role="option"][aria-selected="true"] {
 }
 
 @media (max-width: 480px) {
+  /* Make any remaining fixed-width blocks wrap */
+  [style*="width:"] { max-width: 100% !important; }
+
+
+  :root {
+    --sc-heading-font-size: 1.375rem; /* 22px */
+    --sc-body-font-size: 0.875rem; /* 14px */
+  }
+
   .main .block-container,
   [data-testid="stAppViewContainer"] .block-container {
     padding-left: 0.75rem !important;

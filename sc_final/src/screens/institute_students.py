@@ -187,13 +187,27 @@ def _render_add_student(inst_id: str, classes: list[dict[str, Any]]) -> None:
         else:
             st.info("Select a class before adding a student.")
 
-        c3, c4 = st.columns(2)
+        c3, c4, c5 = st.columns(3)
         s_email = c3.text_input("Email *", placeholder="student@example.com")
         s_phone = c4.text_input("Phone", placeholder="+91 98765 43210")
+        SECTION_OPTIONS = ["A", "B", "C", "D", "E", "F"]
+        s_section = c5.selectbox(
+            "Section",
+            SECTION_OPTIONS,
+            index=0,
+            key="add_student_section",
+        )
 
-        c5, c6 = st.columns(2)
-        p_name = c5.text_input("Parent Name")
-        p_phone = c6.text_input("Parent Phone")
+        c6, c7, c8 = st.columns(3)
+        p_name = c6.text_input("Parent Name")
+        p_phone = c7.text_input("Parent Phone")
+        GENDER_OPTIONS = ["Male", "Female", "Other"]
+        s_gender = c8.selectbox(
+            "Gender",
+            GENDER_OPTIONS,
+            index=0,
+            key="add_student_gender",
+        )
         submitted = st.form_submit_button("Add Student", type="primary", use_container_width=True)
 
     if not submitted:

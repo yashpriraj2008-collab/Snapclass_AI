@@ -20,17 +20,68 @@ from typing import Any
 import streamlit as st
 from supabase import Client, create_client
 
+import os
+
+
 _client: Client | None = None
 _checked: bool = False
 _last_error: str | None = None
 _cached_secrets_mtime: float | None = None
 
-SUPABASE_MISSING_MESSAGE = "Supabase is not configured. Add .streamlit/secrets.toml."
+SUPABASE_MISSING_MESSAGE = (
+    "Supabase is not configured. Add a Streamlit secrets.toml at one of: \n"
+    "- sc_final/.streamlit/secrets.toml\n"
+    "- .streamlit/secrets.toml (repo root)"
+)
 SUPABASE_MISSING_NOTICE_KEY = "_supabase_missing_notice_shown"
 
 
 def _secrets_path() -> Path:
-    return Path(__file__).resolve().parents[2] / ".streamlit" / "secrets.toml"
+    """Return the most likely secrets.toml location for Streamlit.
+
+    Supports both:
+    - repo/.streamlit/secrets.toml (repo root)
+    - sc_final/.streamlit/secrets.toml (app folder)
+    """
+    app_root = Path(__file__).resolve().parents[1]  # sc_final/src/ -> sc_final/
+    repo_root = app_root.parent
+
+
+    candidates = [
+        repo_root / ".streamlit" / "secrets.toml",
+        app_root / ".streamlit" / "secrets.toml",
+    ]
+
+    for p in candidates:
+        try:
+            if p.exists():
+                return p
+        except OSError:
+            continue
+
+    # Default to the app-local path (least surprising for local dev)
+    return candidates[-1]
+
+
+def _streamlit_builtin_secrets_guard() -> None:
+
+    """Prevent Streamlit's built-in “No secrets found” message.
+
+    Streamlit emits that warning when `st.secrets` is accessed and it can't
+    find a secrets.toml in its search paths.
+
+    We already read the correct secrets file ourselves (see _secrets_path).
+    So we set ST_SECRETS_PATH to our resolved file to stop the noisy warning.
+    """
+    try:
+        path = _secrets_path()
+        # Streamlit expects a directory or file path.
+        # Setting it to the resolved file is safe for local dev.
+        os.environ.setdefault("ST_SECRETS_PATH", str(path))
+    except Exception:
+        pass
+
+
 
 
 def _secrets_mtime() -> float | None:
@@ -202,7 +253,11 @@ def _create_supabase_client_cached(current_mtime: float | None) -> tuple[Client 
 
 
 def get_supabase_client() -> Client | None:
+
+    _streamlit_builtin_secrets_guard()
+
     """Return a Streamlit resource-cached Supabase client or None."""
+
     global _client, _checked, _last_error, _cached_secrets_mtime
 
     current_mtime = _secrets_mtime()

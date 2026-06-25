@@ -835,6 +835,196 @@ def verify_teacher(email: str, password: str) -> Dict[str, Any]:
     }
 
 
+def google_login() -> Any:
+    """Create Supabase OAuth URL for Google login.
+
+    UI pattern: show a button/link with the returned auth_url.url.
+    """
+    db = get_supabase()
+    if db is None:
+        return {"ok": False, "message": "Supabase is not configured. Add .streamlit/secrets.toml."}
+
+    try:
+        # Supabase Python SDK returns an object with `.url`
+        auth_url = db.auth.sign_in_with_oauth({"provider": "google"})
+        return {"ok": True, "url": getattr(auth_url, "url", ""), "auth_url": auth_url}
+    except Exception as exc:
+        return {"ok": False, "message": str(exc)}
+
+
+def _profile_is_existing_user(profile: Dict[str, Any] | None) -> bool:
+    if not profile:
+        return False
+    role = str(profile.get("role") or "").strip().lower()
+    return bool(role)
+
+
+def handle_google_post_login() -> None:
+    """Resolve Google OAuth user into app session.
+
+    Works on the next Streamlit render after OAuth completes.
+    If user has no user_profiles row yet, shows Complete Profile form.
+    """
+    import streamlit as st
+
+    if st.session_state.get("logged_in"):
+        return
+    if st.session_state.get("google_profile_handled"):
+        return
+
+    if not _supabase_secrets_ready_local():
+        return
+
+    db = get_supabase()
+    if db is None:
+        return
+
+    # Fetch current session user if possible.
+    user = None
+    try:
+        auth = getattr(db, "auth", None)
+        user = getattr(auth, "get_user", lambda: None)()
+    except Exception:
+        user = None
+
+    # Supabase client SDK v2 returns user differently across versions.
+    # Use best-effort: session_state hints, else email from profile lookup.
+    auth_user_id = str(st.session_state.get("auth_user_id") or "").strip() or ""
+    auth_email = str(st.session_state.get("user_email") or st.session_state.get("email") or "").strip().lower() or ""
+
+    # Best-effort using supabase current user object, if present
+    if not auth_user_id:
+        try:
+            candidate_id = getattr(user, "id", None) or getattr(user, "user_id", None)
+            if candidate_id:
+                auth_user_id = str(candidate_id).strip()
+        except Exception:
+            pass
+
+    if not auth_email:
+        try:
+            candidate_email = getattr(user, "email", None)
+            if candidate_email:
+                auth_email = str(candidate_email).strip().lower()
+        except Exception:
+            pass
+
+    if not auth_email and not auth_user_id:
+        # OAuth not completed or session not available yet.
+        return
+
+    # Lookup profile.
+    profile = None
+    if auth_user_id:
+        profile = get_user_profile(auth_user_id)
+    if not profile and auth_email:
+        profile = get_user_profile_by_email(auth_email)
+
+    if profile and _profile_is_existing_user(profile):
+        role = str(profile.get("role") or "").strip().lower()
+        institute_id = profile.get("institute_id")
+        st.session_state["auth_user_id"] = auth_user_id or str(profile.get("user_id") or profile.get("id") or "")
+        st.session_state["user_id"] = st.session_state["auth_user_id"]
+        st.session_state["user_email"] = auth_email
+        st.session_state["email"] = auth_email
+        st.session_state["user_name"] = str(profile.get("full_name") or auth_email.split("@")[0].title() or "User")
+        st.session_state["institute_id"] = institute_id
+        st.session_state["logged_in"] = True
+        st.session_state["portal"] = role
+
+        if role == "student":
+            st.session_state["role"] = "student"
+            st.session_state.setdefault("student_page", "dashboard")
+            st.session_state["page"] = "dashboard"
+        elif role in {"teacher", "subject_teacher", "class_teacher"}:
+            st.session_state["role"] = "teacher"
+            st.session_state["teacher_page"] = "dashboard"
+            st.session_state["page"] = "dashboard"
+            # ensure teacher_id if missing; downstream will error if absent.
+            st.session_state.setdefault("teacher_id", profile.get("teacher_id") or "")
+        elif role in {"institute_admin", "admin"}:
+            st.session_state["role"] = "admin"
+            st.session_state["active_institute_id"] = institute_id
+            st.session_state["institute_page"] = "institute_dashboard"
+            st.session_state["page"] = "institute_dashboard"
+        else:
+            st.error("This Google account role is not recognized.")
+            return
+
+        st.session_state["google_profile_handled"] = True
+        st.rerun()
+        return
+
+    # First-time login: ask user to complete profile.
+    st.session_state["google_profile_handled"] = True
+    with st.expander("Complete Profile", expanded=True):
+        st.info("Finish setting up your account. This is only needed the first time you log in.")
+        role_choice = st.radio(
+            "Select Role",
+            ["Student", "Teacher", "Institute Admin"],
+            horizontal=False,
+            key="google_role_choice",
+        )
+        full_name = st.text_input(
+            "Full Name *",
+            value=(str(st.session_state.get("user_name") or "").strip() or ""),
+            key="google_full_name",
+        )
+
+        selected_institute_id = None
+        if role_choice == "Institute Admin":
+            selected_institute_id = st.text_input(
+                "Institute ID (as in your system) *",
+                key="google_institute_id",
+            )
+
+        submit = st.button("Create Profile", type="primary", use_container_width=True)
+        if submit:
+            role_norm = {
+                "Student": "student",
+                "Teacher": "teacher",
+                "Institute Admin": "institute_admin",
+            }[role_choice]
+
+            if not full_name.strip():
+                st.error("Please enter Full Name.")
+                return
+
+            if role_norm == "institute_admin" and not (selected_institute_id or "").strip():
+                st.error("Institute ID is required for Institute Admin.")
+                return
+
+            user_id_for_profile = auth_user_id or str(st.session_state.get("auth_user_id") or "").strip()
+            if not user_id_for_profile:
+                st.error("Supabase user id missing. Try logging in again.")
+                return
+
+            save_user_profile(
+                email=auth_email,
+                full_name=full_name.strip(),
+                role=role_norm,
+                user_id=user_id_for_profile,
+                institute_id=(selected_institute_id or None) if role_norm == "institute_admin" else None,
+                status="active",
+            )
+
+            # Re-run to resolve new profile.
+            st.session_state.pop("google_profile_handled", None)
+            st.rerun()
+
+
+def _supabase_secrets_ready_local() -> bool:
+    # reuse existing helper with minimal coupling
+    try:
+        from src.database.client import supabase_secrets_ready
+
+        return supabase_secrets_ready()
+    except Exception:
+        return False
+
+
+
+
 def login_institute_admin(*, email: str, password: str, name: str, institute_id: str) -> Tuple[bool, str]:
     """Compatibility wrapper for institute admin login.
 
@@ -843,6 +1033,7 @@ def login_institute_admin(*, email: str, password: str, name: str, institute_id:
     from src.services.institute_admin_service import login_institute_admin as _impl
 
     return _impl(email=email, password=password, name=name, institute_id=institute_id)
+
 
 
 def logout_user() -> None:

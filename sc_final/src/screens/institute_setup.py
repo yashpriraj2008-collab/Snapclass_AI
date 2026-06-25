@@ -63,14 +63,19 @@ def show_institute_setup() -> None:
         c1, c2 = st.columns(2)
         name = c1.text_input("Institute Name *", value=institute.get("name", ""))
 
-        allowed_types = ["School", "Coaching", "Tuition", "College"]
+        allowed_types = ["School", "Coaching", "Tuition Centre", "College"]
         raw_type = institute.get("institute_type", "School")
         normalized = str(raw_type).strip().lower()
         type_map = {t.lower(): t for t in allowed_types}
+        default_type = "School"
+        if normalized in type_map:
+            default_type = type_map[normalized]
+        elif normalized in ("tuition", "tuition center", "tuition centre"):
+            default_type = "Tuition Centre"
         inst_type = c2.selectbox(
-            "Type",
+            "Institute Type *",
             allowed_types,
-            index=allowed_types.index(type_map.get(normalized, "School")),
+            index=allowed_types.index(default_type),
         )
 
         plan_choice = st.selectbox(
@@ -92,7 +97,15 @@ def show_institute_setup() -> None:
         phone = c6.text_input("Phone", value=institute.get("admin_phone", ""))
 
         c7, c8 = st.columns(2)
-        acyr = c7.text_input("Academic Year", placeholder="2025-26")
+        ACADEMIC_YEARS = ["2025-26", "2026-27", "2027-28", "2028-29"]
+        DEFAULT_ACYR = "2026-27"
+        current_acyr = str(institute.get("academic_year", "")).strip() or DEFAULT_ACYR
+        acyr_index = ACADEMIC_YEARS.index(current_acyr) if current_acyr in ACADEMIC_YEARS else 1
+        acyr = c7.selectbox(
+            "Academic Year *",
+            ACADEMIC_YEARS,
+            index=acyr_index,
+        )
         thr = c8.slider("Attendance Threshold (%)", 50, 100, int(institute.get("attendance_threshold", 75)), 1)
 
         submitted = st.form_submit_button(

@@ -67,7 +67,15 @@ def show_settings():
     thr = st.slider(
         "Attendance threshold (%)", 50, 100, int(inst.get("attendance_threshold", 75)), 1
     )
-    acyr = st.text_input("Academic year", value=str(inst.get("academic_year", "")))
+    ACADEMIC_YEARS = ["2025-26", "2026-27", "2027-28", "2028-29"]
+    DEFAULT_ACYR = "2026-27"
+    current_acyr = str(inst.get("academic_year", "")).strip() or DEFAULT_ACYR
+    acyr_index = ACADEMIC_YEARS.index(current_acyr) if current_acyr in ACADEMIC_YEARS else 1
+    acyr = st.selectbox(
+        "Academic year *",
+        ACADEMIC_YEARS,
+        index=acyr_index,
+    )
     phone = st.text_input("Admin phone", value=inst.get("admin_phone", ""))
     email = st.text_input("Admin email", value=inst.get("admin_email", ""))
 

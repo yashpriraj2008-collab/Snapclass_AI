@@ -285,6 +285,7 @@ def upsert_attendance_record(
     institute_id: str | None = None,
     attendance_verification: str = "manual",
     confidence: Any = None,
+    marked_method: str = "manual",
 ) -> dict[str, Any]:
     ok, message, saved_count, errors = _save_records_for_session(
         supabase=supabase,
@@ -299,12 +300,14 @@ def upsert_attendance_record(
                 "institute_id": institute_id,
                 "verification_method": attendance_verification,
                 "confidence": confidence,
+                "marked_method": marked_method,
             }
         ],
         marked_by=marked_by,
         attendance_date=attendance_date,
         default_verification_method=attendance_verification,
         default_confidence=confidence,
+        default_marked_method=marked_method,
     )
     return {"ok": ok, "message": message, "saved_count": saved_count, "errors": errors}
 
@@ -317,6 +320,7 @@ def _save_records_for_session(
     attendance_date=None,
     default_verification_method: str = "manual",
     default_confidence: Any = None,
+    default_marked_method: str = "manual",
 ):
     """Save one attendance_records row per student for an existing session."""
     if not session_id:
@@ -342,6 +346,9 @@ def _save_records_for_session(
             default_verification_method,
         )
         confidence = (row or {}).get("confidence", default_confidence)
+        marked_method = _clean_mode(
+            (row or {}).get("marked_method") or default_marked_method
+        )
 
         payload = {
             "session_id": str(session_id),
@@ -351,6 +358,7 @@ def _save_records_for_session(
             "marked_at": datetime.utcnow().isoformat(),
             "verification_method": verification_method,
             "attendance_verification": verification_method,
+            "marked_method": marked_method,
         }
         if row_date:
             payload["attendance_date"] = row_date
@@ -413,6 +421,7 @@ def mark_manual_attendance(
         marked_by=teacher_id,
         attendance_date=attendance_date,
         default_verification_method="manual",
+        default_marked_method="manual",
     )
 
 
@@ -472,6 +481,7 @@ def mark_faceid_attendance(
                     "status": "present",
                     "verification_method": next_method,
                     "attendance_verification": next_method,
+                    "marked_method": "faceid",
                     "updated_at": datetime.utcnow().isoformat(),
                 }
             )
@@ -497,6 +507,7 @@ def mark_faceid_attendance(
                 "class_id": str(class_id),
                 "subject_id": str(subject_id),
                 "institute_id": _text(institute_id),
+                "marked_method": "faceid",
             }
         )
         _insert_with_supported_columns(supabase, "attendance_records", payload)
@@ -540,6 +551,7 @@ def save_attendance_records(*args, **kwargs):
             kwargs.get("attendance_date"),
             kwargs.get("verification_method", "manual"),
             kwargs.get("confidence"),
+            kwargs.get("marked_method", "manual"),
         )
         return {
             "success": ok,
@@ -585,6 +597,7 @@ def _save_attendance_records_legacy(records: list[dict[str, Any]]) -> dict[str, 
         mode = _clean_mode(record.get("mode"))
         verification_method = _clean_verification_method(record.get("verification_method"), mode)
         confidence = record.get("confidence")
+        marked_method = _clean_mode(record.get("marked_method") or mode)
 
         if not all([student_id, class_id, subject_id, attendance_date]):
             skipped += 1
@@ -600,7 +613,8 @@ def _save_attendance_records_legacy(records: list[dict[str, Any]]) -> dict[str, 
                 "marked_by": _text(record.get("marked_by") or record.get("teacher_id")),
                 "teacher_id": _text(record.get("teacher_id") or record.get("marked_by")),
                 "institute_id": _text(record.get("institute_id")),
-                "mode": mode,
+                "mode": marked_method,
+                "marked_method": marked_method,
                 "verification_method": verification_method,
                 "confidence": confidence,
             }
@@ -623,13 +637,13 @@ def _save_attendance_records_legacy(records: list[dict[str, Any]]) -> dict[str, 
                     record["class_id"],
                     record["subject_id"],
                     record["attendance_date"],
-                    record["mode"],
+                    record["marked_method"],
                 )
             ].append(record)
 
         saved_rows: list[dict[str, Any]] = []
 
-        for (class_id, subject_id, attendance_date, mode), group in grouped.items():
+        for (class_id, subject_id, attendance_date, marked_method), group in grouped.items():
             first = group[0]
             session = _get_or_create_session(
                 supabase,
@@ -638,7 +652,7 @@ def _save_attendance_records_legacy(records: list[dict[str, Any]]) -> dict[str, 
                 attendance_date=attendance_date,
                 teacher_id=first.get("teacher_id"),
                 institute_id=first.get("institute_id"),
-                mode=mode,
+                mode=marked_method,
                 created_by=first.get("teacher_id"),
             )
             session_id = session.get("id")
@@ -656,6 +670,7 @@ def _save_attendance_records_legacy(records: list[dict[str, Any]]) -> dict[str, 
                     "subject_id": record["subject_id"],
                     "verification_method": record.get("verification_method"),
                     "confidence": record.get("confidence"),
+                    "marked_method": record.get("marked_method") or marked_method,
                 }
                 for record in group
             ]
@@ -666,8 +681,9 @@ def _save_attendance_records_legacy(records: list[dict[str, Any]]) -> dict[str, 
                 rows,
                 first.get("marked_by") or first.get("teacher_id"),
                 attendance_date,
-                default_verification_method=first.get("verification_method") or mode,
+                default_verification_method=first.get("verification_method") or marked_method,
                 default_confidence=first.get("confidence"),
+                default_marked_method=marked_method,
             )
             if not ok:
                 raise RuntimeError(message)
@@ -723,6 +739,10 @@ def _flatten_attendance_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
             item["verification_method"] = str(item["verification_method"]).lower()
         if "attendance_verification" in item and item["attendance_verification"] is not None:
             item["attendance_verification"] = str(item["attendance_verification"]).lower()
+        if "marked_method" in item and item["marked_method"] is not None:
+            item["marked_method"] = str(item["marked_method"]).lower()
+        if item.get("marked_method") not in VALID_MODES:
+            item["marked_method"] = "manual"
         flattened.append(item)
     return flattened
 
@@ -814,3 +834,82 @@ def get_session_attendance_records(
 
 def save_attendance(records: list[dict[str, Any]]) -> dict[str, Any]:
     return save_attendance_records(records)
+
+
+# ── Attendance Percentage Calculations ──
+
+def calculate_attendance_percentage(
+    records: list[dict[str, Any]],
+    subject_id: str | None = None,
+) -> dict[str, Any]:
+    """Calculate attendance percentage, optionally filtered by subject."""
+    filtered = records
+    if subject_id:
+        filtered = [r for r in records if str(r.get("subject_id") or "") == str(subject_id)]
+
+    total = len(filtered)
+    present = sum(
+        1 for r in filtered
+        if str(r.get("status") or "").lower() in {"present", "late"}
+    )
+    absent = total - present
+    pct = round((present / total) * 100, 1) if total > 0 else 0.0
+
+    return {
+        "total": total,
+        "present": present,
+        "absent": absent,
+        "percentage": pct,
+    }
+
+
+def calculate_subject_wise_percentages(
+    records: list[dict[str, Any]],
+    subjects_by_id: dict[str, dict],
+) -> list[dict[str, Any]]:
+    """Calculate attendance percentage per subject."""
+    subject_groups: dict[str, list[dict]] = defaultdict(list)
+    for r in records:
+        sid = str(r.get("subject_id") or "")
+        subject_groups[sid].append(r)
+
+    result = []
+    for subject_id, subject_records in subject_groups.items():
+        subject = subjects_by_id.get(subject_id, {})
+        stats = calculate_attendance_percentage(subject_records)
+        result.append({
+            "subject_id": subject_id,
+            "subject_name": subject.get("subject_name") or subject.get("name") or "Unknown",
+            "subject_code": subject.get("subject_code") or subject.get("code") or "",
+            "total": stats["total"],
+            "present": stats["present"],
+            "absent": stats["absent"],
+            "percentage": stats["percentage"],
+        })
+
+    result.sort(key=lambda x: x["subject_name"])
+    return result
+
+
+def get_todays_attendance(
+    records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Get today's attendance records."""
+    today = _date_only(datetime.utcnow().isoformat())
+    return [r for r in records if _date_only(r.get("attendance_date")) == today]
+
+
+def get_monthly_attendance(
+    records: list[dict[str, Any]],
+    year_month: str | None = None,
+) -> dict[str, Any]:
+    """Get attendance for a month (default: current month)."""
+    if year_month is None:
+        now = datetime.utcnow()
+        year_month = f"{now.year}-{now.month:02d}"
+
+    monthly = [
+        r for r in records
+        if str(r.get("attendance_date") or "").startswith(year_month)
+    ]
+    return calculate_attendance_percentage(monthly)

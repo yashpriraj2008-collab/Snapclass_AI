@@ -191,7 +191,8 @@ def founder_sidebar() -> None:
     with st.sidebar:
         _brand()
         founder_name = st.session_state.get("user_name") or "Founder"
-        _user_chip(_sidebar_user(founder_name, "founder"), "Super Admin")
+        founder_role_label = st.session_state.get("role", "founder").replace("_", " ").title() or "Founder"
+        _user_chip(_sidebar_user(founder_name, "founder"), founder_role_label)
         _section("SNAPCLASS HQ")
         if _nav_btn("Dashboard", "fnav_dash"):
             nav_founder("founder_dashboard")

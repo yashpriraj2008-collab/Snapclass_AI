@@ -108,7 +108,12 @@ def render_founder_institutes() -> None:
             st.caption(f"Selected plan: {plan}")
 
             col9, col10 = st.columns(2)
-            academic_year = col9.text_input("Academic Year", placeholder="2026-27")
+            ACADEMIC_YEARS = ["2025-26", "2026-27", "2027-28", "2028-29"]
+            academic_year = col9.selectbox(
+                "Academic Year",
+                ACADEMIC_YEARS,
+                index=ACADEMIC_YEARS.index("2026-27"),
+            )
             threshold = col10.number_input("Attendance Threshold (%)", min_value=50, max_value=100, value=75)
 
             submitted = st.form_submit_button(
@@ -268,3 +273,146 @@ def render_founder_institutes() -> None:
                             st.rerun()
                         else:
                             st.error(result["message"])
+
+                # Edit toggle (must not interfere with Activate/Deactivate)
+                if not st.session_state.get(f"editing_{institute_id}", False):
+                    if st.button("Edit", key=f"edit_{institute.get('id')}"):
+                        st.session_state[f"editing_{institute_id}"] = True
+
+            # Edit form (shown below the card content only when toggled)
+            if st.session_state.get(f"editing_{institute_id}", False):
+                # Pull available plans from Supabase for the dropdown
+                plans_options: list[dict] = []
+                db = get_supabase_client()
+                if db:
+                    try:
+                        plans_options = db.table("plans").select("id,display_name,name,plan_code").execute().data or []
+                    except Exception:
+                        plans_options = []
+
+                def _plan_display(p: dict) -> str:
+                    return str(
+                        p.get("display_name")
+                        or p.get("name")
+                        or p.get("plan_code")
+                        or p.get("id")
+                        or ""
+                    ).strip()
+
+                def _pick_plan_id_from_current(current_plan_label: str) -> str | None:
+                    current_plan_label = str(current_plan_label or "").strip().lower()
+                    if not current_plan_label:
+                        return None
+                    for p in plans_options:
+                        if str(_plan_display(p)).strip().lower() == current_plan_label:
+                            return str(p.get("id") or "") or None
+                        if str(p.get("name") or "").strip().lower() == current_plan_label:
+                            return str(p.get("id") or "") or None
+                        if str(p.get("plan_code") or "").strip().lower() == current_plan_label:
+                            return str(p.get("id") or "") or None
+                    # If the institutes.plan column already stores plan_id in your DB,
+                    # fall back to matching by id.
+                    for p in plans_options:
+                        if str(p.get("id") or "").strip() == str(current_plan_label).strip():
+                            return str(p.get("id") or "") or None
+                    return None
+
+                current_plan_label = institute.get("plan", "Demo")
+                # Kept for readability; saving logic remaps from selected plan label
+                # to plan_id (if available).
+                _ = _pick_plan_id_from_current(current_plan_label)
+
+
+                plan_labels = [_plan_display(p) for p in plans_options if _plan_display(p)]
+                if not plan_labels:
+                    plan_labels = [str(current_plan_label or "Demo")]
+
+                selected_plan_label = str(current_plan_label or "Demo")
+
+                subscription_default = (
+                    subscription.get("status")
+                    or institute.get("subscription_status")
+                    or "payment_pending"
+                )
+                subscription_default = str(subscription_default).strip().lower()
+
+                subscription_status_options = [
+                    "trial_active",
+                    "active",
+                    "payment_pending",
+                    "expired",
+                    "cancelled",
+                ]
+
+                if subscription_default not in subscription_status_options:
+                    subscription_default = "payment_pending"
+
+                with st.form(key=f"edit_institute_form_{institute_id}"):
+                    new_name = st.text_input(
+                        "Institute name",
+                        value=str(institute.get("name") or ""),
+                    )
+                    new_location = st.text_input(
+                        "Location / city",
+                        value=str(institute.get("city") or ""),
+                    )
+                    new_admin_name = st.text_input(
+                        "Admin name",
+                        value=str(institute.get("admin_name") or ""),
+                    )
+                    new_admin_email = st.text_input(
+                        "Admin email",
+                        value=str(institute.get("admin_email") or ""),
+                    )
+
+                    new_plan_label = st.selectbox(
+                        "Plan",
+                        plan_labels,
+                        index=plan_labels.index(selected_plan_label) if selected_plan_label in plan_labels else 0,
+                    )
+
+                    new_status = st.selectbox(
+                        "Subscription status",
+                        subscription_status_options,
+                        index=subscription_status_options.index(subscription_default)
+                        if subscription_default in subscription_status_options
+                        else 2,
+                    )
+
+                    submitted_save = st.form_submit_button("Save Changes", type="primary")
+                    submitted_cancel = st.form_submit_button("Cancel")
+
+                    if submitted_save:
+                        try:
+                            # Map selected plan label -> plan id when saving.
+                            new_plan_id = None
+                            for p in plans_options:
+                                if _plan_display(p) == str(new_plan_label):
+                                    new_plan_id = str(p.get("id") or "") or None
+                                    break
+
+                            update_payload = {
+                                "name": new_name,
+                                "city": new_location,
+                                "admin_name": new_admin_name,
+                                "admin_email": new_admin_email,
+                                "plan": (new_plan_id or new_plan_label),
+                                "subscription_status": new_status,
+                            }
+
+                            result = (
+                                get_supabase_client()
+                                .table("institutes")
+                                .update(update_payload)
+                                .eq("id", institute.get("id", ""))
+                                .execute()
+                            )
+
+                            st.success("Institute updated successfully.")
+                            st.session_state[f"editing_{institute_id}"] = False
+                            st.rerun()
+                        except Exception:
+                            st.error("Could not update institute. Please try again.")
+                    elif submitted_cancel:
+                        st.session_state[f"editing_{institute_id}"] = False
+                        st.rerun()

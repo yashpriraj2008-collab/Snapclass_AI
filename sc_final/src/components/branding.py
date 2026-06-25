@@ -64,9 +64,9 @@ def render_brand_lockup() -> None:
 
     st.markdown(
         f"""
-        <div class="snapclass-brand-lockup" aria-label="SnapClass AI">
+        <div class="snapclass-brand-lockup" aria-label="SnapClass AI" style="gap:12px;">
           {icon_html}
-          <span class="snapclass-brand-name">
+          <span class="snapclass-brand-name" style="font-size:1.2rem;">
             <span>SnapClass</span><span class="snapclass-brand-ai"> AI</span>
           </span>
         </div>

@@ -74,10 +74,11 @@ def _insert_with_supported_columns(table: str, payload: dict[str, Any]) -> tuple
 
 def list_classes(institute_id: str) -> list[dict[str, Any]]:
     db = _db()
+
     if not db or not institute_id:
         return []
     try:
-        return (
+        rows = (
             db.table("classes")
             .select("*")
             .eq("institute_id", institute_id)
@@ -86,16 +87,19 @@ def list_classes(institute_id: str) -> list[dict[str, Any]]:
             .data
             or []
         )
+        return rows
     except Exception:
         return []
 
 
+
 def list_subjects(institute_id: str) -> list[dict[str, Any]]:
     db = _db()
+
     if not db or not institute_id:
         return []
     try:
-        return (
+        rows = (
             db.table("subjects")
             .select("*")
             .eq("institute_id", institute_id)
@@ -104,8 +108,10 @@ def list_subjects(institute_id: str) -> list[dict[str, Any]]:
             .data
             or []
         )
+        return rows
     except Exception:
         return []
+
 
 
 def list_students(institute_id: str) -> list[dict[str, Any]]:

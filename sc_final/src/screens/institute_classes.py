@@ -88,9 +88,27 @@ def _setup_progress(
         ("Teacher assigned", assignment_done),
         ("Student added", bool(students)),
     ]
+
+    # Colorize progress state:
+    # - Done      => green
+    # - Pending   => orange
+    # - Incomplete=> red (only used if we can't compute properly)
+    def _state_color(done: bool) -> str:
+        return "#10B981" if done else "#F59E0B"  # green/orange
+
     cols = st.columns(len(items))
     for col, (label, done) in zip(cols, items):
-        col.metric(label, "Done" if done else "Pending")
+        state = "Done" if done else "Pending"
+        color = _state_color(done)
+        col.markdown(
+            f"""
+            <div style="text-align:center;">
+              <div style="font-size:.78rem;color:#6B7280;font-weight:600;margin-bottom:6px;">{label}</div>
+              <div style="font-size:1.15rem;font-weight:800;color:{color};">{state}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def _class_counts(classes: list[dict[str, Any]], subjects: list[dict[str, Any]], students: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
@@ -108,15 +126,81 @@ def _class_counts(classes: list[dict[str, Any]], subjects: list[dict[str, Any]],
 
 def _render_add_class(inst_id: str) -> None:
     st.subheader("Add Class")
+
+    CLASS_NAME_OPTIONS = [
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "11",
+        "12",
+        "JEE",
+        "NEET",
+        "Foundation",
+        "Dropper",
+    ]
+    SECTION_OPTIONS = ["A", "B", "C", "D", "E", "F"]
+    ACADEMIC_YEAR_OPTIONS = [
+        "2025-26",
+        "2026-27",
+        "2027-28",
+        "2028-29",
+    ]
+
+    DEFAULT_ACAD_YEAR = "2026-27"
+
     with st.form("add_class_form", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
-        cls_name = c1.text_input("Class Name *", placeholder="12")
-        section = c2.text_input("Section *", placeholder="A")
-        acad_yr = c3.text_input("Academic Year *", placeholder="2026-27")
-        submitted = st.form_submit_button("Add Class", type="primary", use_container_width=True)
+        cls_name = c1.selectbox(
+            "Class Name *",
+            CLASS_NAME_OPTIONS,
+            index=0,
+            key="add_class_name_select",
+        )
+        section = c2.selectbox(
+            "Section *",
+            SECTION_OPTIONS,
+            index=0,
+            key="add_class_section_select",
+        )
+        acad_yr = c3.selectbox(
+            "Academic Year *",
+            ACADEMIC_YEAR_OPTIONS,
+            index=ACADEMIC_YEAR_OPTIONS.index(DEFAULT_ACAD_YEAR)
+            if DEFAULT_ACAD_YEAR in ACADEMIC_YEAR_OPTIONS
+            else 0,
+            key="add_class_acad_year_select",
+        )
+
+        # Custom gradient button so the action isn't default Streamlit styling.
+        st.markdown(
+            """
+            <style>
+              div[data-testid='stForm'] button[type='submit'] { 
+                background: linear-gradient(90deg, #6366F1 0%, #8B5CF6 50%, #EC4899 100%) !important;
+                color: white !important;
+                border: none !important;
+                border-radius: 16px !important;
+                height: 52px !important;
+                font-weight: 700;
+              }
+              div[data-testid='stForm'] button[type='submit']:hover {
+                filter: brightness(1.05);
+                transform: translateY(-1px);
+                transition: all 120ms ease;
+              }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        submitted = st.form_submit_button(
+            "Add Class", use_container_width=True, type="primary"
+        )
 
     if not submitted:
         return
+
 
     if _db() and inst_id:
         result = add_class(
@@ -142,8 +226,9 @@ def _render_add_class(inst_id: str) -> None:
     section_value = _text(section).upper()
     academic_year = _text(acad_yr)
     if not class_name or not section_value or not academic_year:
-        st.error("Class name, section, and academic year are required.")
+        st.error("Please select class name, section, and academic year.")
         return
+
 
     duplicate = any(
         _text(row.get("class_name")).lower() == class_name.lower()

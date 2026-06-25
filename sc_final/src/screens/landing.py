@@ -395,37 +395,37 @@ def _render_portals() -> None:
     portals = [
         (
             c1,
-            "F",
+            "🏛️",
             "Founder Portal",
             "Manage SnapClass operations, institutes, plans, and access codes.",
-            "linear-gradient(135deg,#06B6D4,#3B82F6)",
+            "linear-gradient(135deg,#6366f1,#8b5cf6)",
             "founder_auth",
             "Founder Login",
         ),
         (
             c2,
-            "A",
+            "🛡️",
             "Admin Portal",
             "Manage teachers, students, classes, subjects, attendance, and reports.",
-            "linear-gradient(135deg,#10B981,#22C55E)",
+            "linear-gradient(135deg,#6366f1,#8b5cf6)",
             "institute_login",
             "Admin Login",
         ),
         (
             c3,
-            "T",
+            "🎓",
             "Teacher Portal",
             "Mark attendance with AI, manage classes, and review student records.",
-            "linear-gradient(135deg,#FF4FA3,#EC4899)",
+            "linear-gradient(135deg,#8b5cf6,#ec4899)",
             "teacher_auth",
             "Teacher Login",
         ),
         (
             c4,
-            "S",
+            "📖",
             "Student Portal",
             "Register or login to view attendance, subjects, and reports.",
-            "linear-gradient(135deg,#5B6CFF,#6C7BFF)",
+            "linear-gradient(135deg,#8b5cf6,#ec4899)",
             "student_auth",
             "Student Login",
         ),
@@ -436,7 +436,7 @@ def _render_portals() -> None:
             st.markdown(
                 f"""
                 <div class="sc-portal-card">
-                  <div class="sc-portal-icon" style="background:{grad};">{icon}</div>
+                  <div class="sc-portal-icon" style="background:{grad};font-size:32px;">{icon}</div>
                   <div class="sc-portal-title">{title}</div>
                   <div class="sc-portal-desc">{desc}</div>
                 </div>

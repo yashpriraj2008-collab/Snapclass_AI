@@ -45,10 +45,11 @@ def logout():
             try: db.auth.sign_out()
             except: pass
     except: pass
-    keep = {"institutes","school_codes","teachers","classes","subjects","students"}
+    # Clear ALL session state to prevent data leaking between users
     for k in list(st.session_state.keys()):
-        if k not in keep:
-            del st.session_state[k]
+        del st.session_state[k]
+    # Re-init defaults
+    init_session()
     st.session_state.page = "landing"
     st.rerun()
 
@@ -71,8 +72,4 @@ def nav_founder(page: str):
 def check_route_access():
     if not st.session_state.get("role"):
         require_login()
-        st.stop()
-        st.error("🔒 Please log in first.")
-        if st.button("← Home", key="route_home"):
-            go("landing")
         st.stop()

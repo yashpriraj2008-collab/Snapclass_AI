@@ -110,14 +110,12 @@ def _remember_institute_id(institute_id: str) -> str:
 
 
 def get_current_institute_id() -> str:
-    """Return the institute id all admin pages should use.
+    """Return the institute id all admin pages should use."""
 
-    The resolver first uses the session id set during admin login/join/demo
-    setup. If that is absent, it repairs the session from the logged-in admin's
-    user_profiles row.
-    """
     candidates = _candidate_session_ids()
     profile_institute_id = _fetch_profile_institute_id()
+
+
     if profile_institute_id:
         return _remember_institute_id(profile_institute_id)
 

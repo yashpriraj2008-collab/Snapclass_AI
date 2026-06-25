@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SnapClass Realtime Attendance</title>
+    <style>
+        body {
+            margin: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <script type="module">
+        // This file is embedded into Streamlit via st.components.v1.html.
+        // It uses Supabase Realtime over websockets and notifies the Streamlit
+        // iframe parent when attendance changes.
+        //
+        // Communication: window.parent.postMessage({type:'SC_ATTENDANCE_EVENT', payload:{...}}, '*')
+
+        const supabaseUrl = window.__SUPABASE_URL__ || '';
+        const supabaseAnonKey = window.__SUPABASE_ANON_KEY__ || '';
+        const studentId = window.__STUDENT_ID__ || '';
+
+        function safeString(x) {
+            try { return (x ?? '').toString(); } catch { return ''; }
+        }
+
+        if (!supabaseUrl || !supabaseAnonKey || !studentId) {
+            // Nothing to subscribe.
+            window.parent.postMessage({ type: 'SC_ATTENDANCE_EVENT', payload: { ok: false, reason: 'missing_config' } }, '*');
+        } else {
+            // Use the Supabase JS client from CDN.
+            // Note: streamlit serves this HTML inside an iframe.
+            import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.46.1/dist/umd/supabase.js')
+                .then(async (mod) => {
+                    const { createClient } = mod;
+                    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+                        realtime: { params: { eventsPerSecond: 10 } }
+                    });
+
+                    // Subscribe to attendance_notifications and attendance_records.
+                    const channels = [];
+
+                    function notifyUpdate(extra = {}) {
+                        window.parent.postMessage({
+                            type: 'SC_ATTENDANCE_EVENT',
+                            payload: { ok: true, student_id: studentId, ...extra, ts: Date.now() }
+                        }, '*');
+                    }
+
+                    // notifications: filter client-side by student_id
+                    const notifChannel = supabase
+                        .channel(`sc_attendance_notifications_${studentId}`)
+                        .on(
+                            'postgres_changes',
+                            {
+                                event: '*',
+                                schema: 'public',
+                                table: 'attendance_notifications',
+                            },
+                            (payload) => {
+                                const newRow = payload.new || {};
+                                const oldRow = payload.old || {};
+                                const sid = safeString(newRow.student_id || oldRow.student_id);
+                                if (sid === studentId) {
+                                    notifyUpdate({ source: 'attendance_notifications', action: payload.eventType || payload.event, id: newRow.id || oldRow.id });
+                                }
+                            }
+                        )
+                        .subscribe((status) => {
+                            // connected/subscribed
+                        });
+                    channels.push(notifChannel);
+
+                    // attendance_records: filter client-side by student_id
+                    const recordsChannel = supabase
+                        .channel(`sc_attendance_records_${studentId}`)
+                        .on(
+                            'postgres_changes',
+                            {
+                                event: '*',
+                                schema: 'public',
+                                table: 'attendance_records',
+                            },
+                            (payload) => {
+                                const newRow = payload.new || {};
+                                const oldRow = payload.old || {};
+                                const sid = safeString(newRow.student_id || oldRow.student_id);
+                                if (sid === studentId) {
+                                    notifyUpdate({ source: 'attendance_records', action: payload.eventType || payload.event, id: newRow.id || oldRow.id });
+                                }
+                            }
+                        )
+                        .subscribe((status) => {
+                            // connected/subscribed
+                        });
+                    channels.push(recordsChannel);
+
+                })
+                .catch((err) => {
+                    window.parent.postMessage({ type: 'SC_ATTENDANCE_EVENT', payload: { ok: false, reason: 'js_import_failed', error: String(err) } }, '*');
+                });
+        }
+    </script>
+</body>
+
+</html>

@@ -362,6 +362,7 @@ def list_classes(institute_id: str) -> list[dict[str, Any]]:
 
 def list_students(institute_id: str) -> list[dict[str, Any]]:
     db = _db()
+
     if not db or not institute_id:
         return []
     try:
@@ -374,6 +375,7 @@ def list_students(institute_id: str) -> list[dict[str, Any]]:
             .data
             or []
         )
+
         try:
             profiles = (
                 db.table("user_profiles")

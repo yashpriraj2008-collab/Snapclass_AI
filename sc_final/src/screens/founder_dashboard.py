@@ -265,7 +265,14 @@ def _render_institute_actions(institute: dict[str, Any], idx: int) -> None:
                 state = st.text_input("State", value=_text(institute.get("state"), ""))
                 admin_name = st.text_input("Admin name", value=_text(institute.get("admin_name"), ""))
                 admin_email = st.text_input("Admin email", value=_text(institute.get("admin_email"), ""))
-                plan = st.text_input("Plan", value=_text(institute.get("plan"), "Demo"))
+                PLANS_OPTIONS = ["Demo", "Free Demo", "Starter", "Pro", "Enterprise"]
+                current_plan = _text(institute.get("plan"), "Demo")
+                plan_index = PLANS_OPTIONS.index(current_plan) if current_plan in PLANS_OPTIONS else 0
+                plan = st.selectbox(
+                    "Plan",
+                    PLANS_OPTIONS,
+                    index=plan_index,
+                )
                 if st.form_submit_button("Save Institute", use_container_width=True):
                     result = update_institute(
                         institute_id,

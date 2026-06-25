@@ -3,8 +3,8 @@
   position: fixed;
   right: 28px;
   bottom: 28px;
-  width: 60px;
-  height: 60px;
+  width: var(--chatbot-size-desktop, 72px);
+  height: var(--chatbot-size-desktop, 72px);
   border-radius: 999px;
   background: var(--primary, #5B6CFF);
   color: white;
@@ -25,8 +25,8 @@
 
 .sc-chat-window {
   position: fixed;
-  right: 28px;
-  bottom: 104px;
+  right: var(--chatbot-offset, 24px);
+  bottom: calc(var(--chatbot-size-desktop, 72px) + 32px);
   width: 340px;
   background: #fff;
   border-radius: 24px;

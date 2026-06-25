@@ -31,51 +31,10 @@ with time_block("app startup"):
     load_css()
 
 st.markdown(
-    """
-<style>
-
-.stTextInput input,
-.stDateInput input {
-    background-color: #ffffff !important;
-    color: #111827 !important;
-}
-
-.stFileUploader,
-.stCameraInput {
-    background-color: transparent !important;
-    color: #111827 !important;
-}
-
-.stFileUploader * {
-    color: #111827 !important;
-}
-
-.snap-hidden-debug {
-    display: none;
-}
-
-/* SIDEBAR */
-section[data-testid="stSidebar"] {
-    background: #ffffff !important;
-}
-
-/* MAIN PAGE */
-.main {
-    background: #f5f7fb;
-}
-
-/* CARDS */
-.block-container {
-    padding-top: 1rem;
-}
-
-/* SUCCESS BOX */
-.stSuccess {
-    border-radius: 12px;
-}
-
-</style>
-""",
+    """<style>
+.snap-hidden-debug { display: none !important; }
+.stSuccess { border-radius: 12px !important; }
+</style>""",
     unsafe_allow_html=True,
 )
 inject_responsive_css()
@@ -243,8 +202,8 @@ try:
 
         show_founder_auth()
 
-    # ── FOUNDER
-    elif role == "founder":
+    # ── FOUNDER / SUPER ADMIN
+    elif role in {"founder", "super_admin"}:
         from src.components.sidebar import founder_sidebar
         founder_sidebar()
         fp = st.session_state.get("founder_page", "founder_dashboard")
@@ -389,11 +348,19 @@ else:
 
 
 # Render SnapBot globally on every page (must be outside all page conditions)
-render_snapbot_floating(
-    {
-        "current_role": st.session_state.get("role") or st.session_state.get("user_role") or "public",
-        "current_page": _snapbot_page_key(),
-        "current_user_name": st.session_state.get("user_name") or st.session_state.get("name"),
-        "last_error": st.session_state.get("last_error", ""),
-    }
-)
+# Crash-guard: SnapBot must never take down the entire app.
+try:
+    render_snapbot_floating(
+        {
+            "current_role": st.session_state.get("role")
+            or st.session_state.get("user_role")
+            or "public",
+            "current_page": _snapbot_page_key(),
+            "current_user_name": st.session_state.get("user_name") or st.session_state.get("name"),
+            "last_error": st.session_state.get("last_error", ""),
+        }
+    )
+except Exception as snap_err:
+    # Store for debugging; do not raise.
+    st.session_state["last_error"] = f"snapbot_render_error: {snap_err}"
+

@@ -31,9 +31,14 @@ def require_login(required_role: str | None = None) -> bool:
             elif required_role == "student":
                 st.session_state.page = "student_auth"
             elif required_role in {"founder", "admin", "institute_admin"}:
-                st.session_state.page = "founder_auth" if required_role == "founder" else "institute_login"
+                st.session_state.page = (
+                    "founder_auth"
+                    if required_role in {"founder", "super_admin"}
+                    else "institute_login"
+                )
             else:
                 st.session_state.page = "landing"
+
             st.rerun()
         return False
 

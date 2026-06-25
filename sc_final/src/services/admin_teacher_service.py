@@ -212,6 +212,7 @@ def add_teacher(
 
 def list_teachers(institute_id: str) -> list[dict[str, Any]]:
     db = _db()
+
     if not db or not institute_id:
         return []
     try:
@@ -224,6 +225,7 @@ def list_teachers(institute_id: str) -> list[dict[str, Any]]:
             .data
             or []
         )
+
         emails = {_email(row.get("email")) for row in teachers if row.get("email")}
         try:
             profiles = (
@@ -299,10 +301,11 @@ def list_subjects(institute_id: str, class_id: str | None = None) -> list[dict[s
 
 def list_teacher_assignments(institute_id: str) -> list[dict[str, Any]]:
     db = _db()
+
     if not db or not institute_id:
         return []
     try:
-        return (
+        rows = (
             db.table("teacher_assignments")
             .select("*, teachers(*), classes(*), subjects(*)")
             .eq("institute_id", institute_id)
@@ -310,9 +313,11 @@ def list_teacher_assignments(institute_id: str) -> list[dict[str, Any]]:
             .data
             or []
         )
+        return rows
+
     except Exception:
         try:
-            return (
+            rows = (
                 db.table("teacher_assignments")
                 .select("*")
                 .eq("institute_id", institute_id)
@@ -320,8 +325,10 @@ def list_teacher_assignments(institute_id: str) -> list[dict[str, Any]]:
                 .data
                 or []
             )
+            return rows
         except Exception:
             return []
+
 
 
 def assignment_counts(institute_id: str) -> dict[str, int]:

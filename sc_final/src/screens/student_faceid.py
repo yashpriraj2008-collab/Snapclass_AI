@@ -1,4 +1,4 @@
-﻿"""Student FaceID attendance â€” enrollment + verification."""
+﻿"""Student FaceID attendance — enrollment + verification."""
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -12,8 +12,7 @@ try:
     import importlib
 
     st = importlib.import_module("streamlit")
-except Exception:
-    # Provide a clear error when streamlit is not available at runtime.
+except ModuleNotFoundError:
     raise ImportError("streamlit is not installed. Please install it with: pip install streamlit")
 
 from src.database.client import get_supabase_client
@@ -173,13 +172,48 @@ def validate_student_subject_match(
         enrollment_rows = []
 
     enrollment = enrollment_rows[0] if enrollment_rows else {}
+
+    # Debug: capture all relevant IDs (requested by task).
+    student_class_id = student.get("class_id")
+    subject_class_id = subject.get("class_id")
+    subject_enrollment_class_id = enrollment.get("class_id") if enrollment else None
+    institute_id = subject.get("institute_id") or student.get("institute_id")
+
+    validation_log = {
+        "studentId": student.get("id"),
+        "studentClassId": student_class_id,
+        "subjectId": subject.get("id"),
+        "subjectClassId": subject_class_id,
+        "subjectEnrollmentClassId": subject_enrollment_class_id,
+        "instituteId": institute_id,
+        "hasEnrollmentRow": bool(enrollment_rows),
+    }
+    _show_debug("Developer Debug", {"validate_student_subject_match": validation_log})
+
     if enrollment:
         enrollment_class_id = enrollment.get("class_id") or subject.get("class_id")
         if enrollment_class_id and subject.get("class_id") and str(enrollment_class_id) != str(subject.get("class_id")):
-            return False, "This subject enrollment is linked to a different class. Ask admin to fix the subject enrollment."
-    elif student.get("class_id") and subject.get("class_id") and str(student.get("class_id")) != str(subject.get("class_id")):
-        return False, "Your class does not match this subject. Ask admin to fix your class mapping."
+            return False, {
+                "error": "SUBJECT_ENROLLMENT_CLASS_MISMATCH",
+                "message": "Subject enrollment class does not match the subject class.",
+                "student_class_id": str(student_class_id or ""),
+                "subject_class_id": str(subject_class_id or ""),
+                "enrollment_class_id": str(subject_enrollment_class_id or ""),
+                "institute_id": str(institute_id or ""),
+            }
+    else:
+        # No enrollment row exists (or was blocked by RLS).
+        if student_class_id is not None and subject_class_id is not None and str(student_class_id) != str(subject_class_id):
+            return False, {
+                "error": "STUDENT_SUBJECT_CLASS_MISMATCH",
+                "message": "Your student class does not match this subject.",
+                "student_class_id": str(student_class_id or ""),
+                "subject_class_id": str(subject_class_id or ""),
+                "institute_id": str(institute_id or ""),
+                "hint": "Ask admin to fix students.class_id ↔ subjects.class_id (or create subject_enrollments row).",
+            }
 
+    # If classes match, still return resolved payload.
     return True, {
         "student_id": student["id"],
         "subject_id": subject["id"],
@@ -188,6 +222,7 @@ def validate_student_subject_match(
         "teacher_id": selected_subject.get("teacher_id") or subject.get("teacher_id"),
         "enrollment": enrollment,
     }
+
 
 
 def _session_email() -> str:

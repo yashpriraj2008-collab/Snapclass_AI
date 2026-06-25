@@ -3,16 +3,23 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.components.ui import navbar
-from src.database.client import supabase_secrets_ready
-from src.services.auth_service import verify_student, verify_teacher
-from src.services.user_onboarding_service import register_student_with_code, register_teacher_with_invite
-from src.components.navigation import render_back_to_home
+from src.services.auth_service import handle_google_post_login, google_login, verify_student, verify_teacher
+from src.services.user_onboarding_service import (
+    register_student_with_code,
+    register_teacher_with_invite,
+)
 from src.utils.session import login
-
-
-def _back() -> None:
-    render_back_to_home(key="auth_back_home")
+from src.database.client import supabase_secrets_ready
+from src.components.auth_components import (
+    AuthCard,
+    AuthCardEnd,
+    AuthBackButton,
+    AuthHeader,
+    AuthInput,
+    AuthButton,
+    GoogleButton,
+    AuthDivider,
+)
 
 
 def _supabase_ready() -> bool:
@@ -25,7 +32,7 @@ def _show_debug(result: dict) -> None:
             st.code(str(result.get("debug")))
 
 
-def show_auth(role_hint: str = "student"):
+def show_auth(role_hint: str = "student") -> None:
     """Compatibility wrapper called by old app.py."""
     if role_hint == "teacher":
         show_teacher_auth()
@@ -33,28 +40,31 @@ def show_auth(role_hint: str = "student"):
         show_student_auth()
 
 
-def show_student_auth():
-    navbar(show_links=False)
-    _back()
+def show_student_auth() -> None:
     if not _supabase_ready():
         return
 
-    st.markdown("<div style='max-width:480px;margin:0 auto;'>", unsafe_allow_html=True)
-    st.markdown(
-        """<div class="sc-card" style="text-align:center;padding:32px;margin-bottom:20px;">
-      <div style="font-size:3rem;margin-bottom:10px;">Student</div>
-      <h2 style="margin:0 0 4px;">Student Portal</h2>
-      <p style="color:#6B7280;margin:0;">Sign in or create your account</p>
-    </div>""",
-        unsafe_allow_html=True,
+    AuthCard()
+    AuthBackButton(key="auth_student_back")
+    AuthHeader(
+        title="Student Portal",
+        subtitle="Sign in or create your account",
+        brand_text="ST",
     )
 
     tab_in, tab_reg = st.tabs(["Sign In", "Register"])
 
     with tab_in:
-        email = st.text_input("Email", key="sl_email", placeholder="you@email.com")
-        pwd = st.text_input("Password", key="sl_pass", type="password", placeholder="Password")
-        if st.button("Sign In", key="sl_submit", type="primary", use_container_width=True):
+        google_auth = google_login()
+        google_url = google_auth.get("url") if isinstance(google_auth, dict) and google_auth.get("ok") else None
+        GoogleButton(google_url)
+
+        AuthDivider()
+
+        email = AuthInput("Email", key="sl_email", placeholder="you@email.com")
+        pwd = AuthInput("Password", key="sl_pass", placeholder="Password", type="password")
+
+        if AuthButton("Sign In", key="sl_submit"):
             if not email or not pwd:
                 st.error("Please enter email and password.")
             else:
@@ -82,31 +92,32 @@ def show_student_auth():
                     st.error("Invalid email or password.")
 
     with tab_reg:
-        full_name = st.text_input("Full Name *", key="sr_full_name", placeholder="Your Name")
-        email = st.text_input("Email *", key="sr_email", placeholder="you@email.com")
-        code = st.text_input("Roll Number or Student Code *", key="sr_roll", placeholder="STU-AB12CD34")
+        full_name = AuthInput("Full Name *", key="sr_full_name", placeholder="Your Name")
+        email = AuthInput("Email *", key="sr_email", placeholder="you@email.com")
+        code = AuthInput("Roll Number or Student Code *", key="sr_roll", placeholder="STU-AB12CD34")
         st.caption(
-            "Get this code from your class teacher or institute admin. It may be shared on WhatsApp, email, or your student ID slip."
+            "Get this code from your class teacher or institute admin. "
+            "It may be shared on WhatsApp, email, or your student ID slip."
         )
-        no_code_clicked = st.button("I don't have a code", key="sr_no_code", use_container_width=False)
-        if no_code_clicked:
+
+        if st.button("I don't have a code", key="sr_no_code", use_container_width=False):
             st.session_state["student_no_code_help"] = True
         if st.session_state.get("student_no_code_help"):
             st.info(
                 "You need a student code to register. Ask your teacher or institute admin to add you first."
             )
-            c_no_code_1, c_no_code_2 = st.columns(2)
-            with c_no_code_1:
+            c1, c2 = st.columns(2)
+            with c1:
                 if st.button("Back to Login", key="sr_back_login", use_container_width=True):
                     st.session_state["student_no_code_help"] = False
                     st.info("Open the Sign In tab to log in if you already have an account.")
-            with c_no_code_2:
+            with c2:
                 if st.button("Contact Institute", key="sr_contact_institute", use_container_width=True):
                     st.info("Please contact your school/coaching admin.")
 
-        pwd = st.text_input("Password *", key="sr_password", type="password", placeholder="Min 8 chars")
+        pwd = AuthInput("Password *", key="sr_password", placeholder="Min 8 chars", type="password")
 
-        if st.button("Create Account", key="sr_submit", type="primary", use_container_width=True):
+        if AuthButton("Create Account", key="sr_submit"):
             full_name = (full_name or "").strip()
             email = (email or "").strip().lower()
             code = (code or "").strip()
@@ -129,6 +140,7 @@ def show_student_auth():
                     )
                     return
                 st.error("Please fill: " + ", ".join(missing))
+                return
             if len(pwd) < 8:
                 st.error("Password must be at least 8 characters.")
                 return
@@ -154,7 +166,6 @@ def show_student_auth():
                 st.session_state["page"] = "dashboard"
                 st.rerun()
             else:
-                # Required UX mapping
                 msg = (result.get("message") or "Registration failed.").strip()
                 if "Invalid student code" in msg or "Invalid student code/roll number" in msg:
                     st.error("Invalid student code. Please ask your teacher/admin.")
@@ -165,30 +176,38 @@ def show_student_auth():
                 else:
                     st.error(msg)
                 _show_debug(result)
-    st.markdown("</div>", unsafe_allow_html=True)
+
+    AuthCardEnd()
 
 
-def show_teacher_auth():
-    navbar(show_links=False)
-    _back()
+def show_teacher_auth() -> None:
     if not _supabase_ready():
         return
 
-    st.markdown("<div style='max-width:480px;margin:0 auto;'>", unsafe_allow_html=True)
-    st.markdown(
-        """<div class="sc-card" style="text-align:center;padding:32px;margin-bottom:20px;">
-      <h2 style="margin:0 0 4px;">Teacher Portal</h2>
-      <p style="color:#6B7280;margin:0;">Sign in or create your account</p>
-    </div>""",
-        unsafe_allow_html=True,
+    AuthCard()
+    AuthBackButton(key="auth_teacher_back")
+    AuthHeader(
+        title="Teacher Portal",
+        subtitle="Sign in or create your account",
+        brand_text="TC",
     )
+
+    # If OAuth completed recently, attempt to handle/route.
+    handle_google_post_login()
 
     tab_in, tab_reg = st.tabs(["Sign In", "Register"])
 
     with tab_in:
-        email = st.text_input("Email", key="tl_email", placeholder="teacher@school.com")
-        pwd = st.text_input("Password", key="tl_pass", type="password", placeholder="Password")
-        if st.button("Sign In", key="tl_submit", type="primary", use_container_width=True):
+        google_auth = google_login()
+        google_url = google_auth.get("url") if isinstance(google_auth, dict) and google_auth.get("ok") else None
+        GoogleButton(google_url)
+
+        AuthDivider()
+
+        email = AuthInput("Email", key="tl_email", placeholder="teacher@school.com")
+        pwd = AuthInput("Password", key="tl_pass", placeholder="Password", type="password")
+
+        if AuthButton("Sign In", key="tl_submit"):
             if not email or not pwd:
                 st.error("Please enter email and password.")
             else:
@@ -219,15 +238,23 @@ def show_teacher_auth():
     with tab_reg:
         st.markdown("### Create Teacher Account")
         st.caption("Use the invite code shared by your institute admin.")
-        full_name = st.text_input("Full Name *", key="tr_full_name", placeholder="Dr. Sharma")
-        email = st.text_input("Email *", key="tr_email", placeholder="teacher@school.com")
-        invite_code = st.text_input("Teacher Invite Code *", key="tr_invite_code", placeholder="TCH-AB12CD34")
-        st.caption("Get this invite code from your institute admin or SnapClass school coordinator.")
-        if st.button("I don't have an invite code", key="tr_no_invite_code", use_container_width=False):
-            st.info("Ask your institute admin to add you as a teacher first. You cannot register without an invite code.")
-        pwd = st.text_input("Password *", key="tr_password", type="password", placeholder="Min 8 chars")
 
-        if st.button("Create Account", key="tr_submit", type="primary", use_container_width=True):
+        full_name = AuthInput("Full Name *", key="tr_full_name", placeholder="Dr. Sharma")
+        email = AuthInput("Email *", key="tr_email", placeholder="teacher@school.com")
+        invite_code = AuthInput("Teacher Invite Code *", key="tr_invite_code", placeholder="TCH-AB12CD34")
+        st.caption(
+            "Get this invite code from your institute admin or SnapClass school coordinator."
+        )
+
+        if st.button("I don't have an invite code", key="tr_no_invite_code", use_container_width=False):
+            st.info(
+                "Ask your institute admin to add you as a teacher first. "
+                "You cannot register without an invite code."
+            )
+
+        pwd = AuthInput("Password *", key="tr_password", placeholder="Min 8 chars", type="password")
+
+        if AuthButton("Create Account", key="tr_submit"):
             full_name = (full_name or "").strip()
             email = (email or "").strip().lower()
             invite_code = (invite_code or "").strip()
@@ -273,7 +300,10 @@ def show_teacher_auth():
             else:
                 msg = (result.get("message") or "Registration failed.").strip()
                 if "Database schema missing teachers.invite_code" in msg:
-                    st.error("Database schema missing teachers.invite_code. Run database/fix_teacher_invite_code.sql.")
+                    st.error(
+                        "Database schema missing teachers.invite_code. "
+                        "Run database/fix_teacher_invite_code.sql."
+                    )
                 elif "Invalid teacher email or invite code" in msg or "Invalid teacher invite code" in msg:
                     st.error("Invalid teacher email or invite code.")
                 elif "not assigned to this email" in msg:
@@ -283,16 +313,20 @@ def show_teacher_auth():
                 elif "expired" in msg:
                     st.error("This invite code has expired. Ask admin to generate a new one.")
                 elif "rate limit" in msg.lower() or "too many signup" in msg.lower():
-                    st.error("Too many signup attempts. Please wait a few minutes, or sign in if this account already exists.")
+                    st.error(
+                        "Too many signup attempts. Please wait a few minutes, "
+                        "or sign in if this account already exists."
+                    )
                 elif "Supabase unavailable" in msg:
                     st.error("Supabase unavailable. Please try again.")
                 else:
                     st.error(msg)
                 _show_debug(result)
-    st.markdown("</div>", unsafe_allow_html=True)
+
+    AuthCardEnd()
 
 
-def show_admin_auth():
+def show_admin_auth() -> None:
     from src.screens.institute_login import show_institute_login
 
     show_institute_login()
